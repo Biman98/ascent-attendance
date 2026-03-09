@@ -20,16 +20,15 @@ input::placeholder{color:#7d8590}
 select{-webkit-appearance:auto;appearance:auto}
 .btn{display:block;width:100%;padding:14px;border-radius:12px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;border:none;text-align:center;-webkit-tap-highlight-color:transparent;transition:opacity .2s}
 .btn:active{opacity:.8}
-.bp{background:#00d4aa;color:#0c1117}
-.bs{background:transparent;color:#7d8590;border:1px solid #30363d}
+.bp{background:#00d4aa;color:#0c1117}.bs{background:transparent;color:#7d8590;border:1px solid #30363d}
 .card{background:#161b22;border-radius:14px;padding:16px;border:1px solid #30363d;margin-bottom:12px}
 .toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%) translateY(80px);background:#161b22;color:#e6edf3;padding:12px 24px;border-radius:12px;border:1px solid #00d4aa;z-index:999;font-size:14px;opacity:0;transition:all .3s;white-space:nowrap;max-width:90%}
 .toast.on{transform:translateX(-50%) translateY(0);opacity:1}
 .nav{position:fixed;bottom:0;left:0;right:0;max-width:480px;margin:0 auto;background:#161b22;border-top:1px solid #30363d;display:flex;justify-content:space-around;padding:8px 0 env(safe-area-inset-bottom,12px);z-index:100}
-.nav button{background:none;border:none;color:#7d8590;font-size:10px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px;font-family:inherit;-webkit-tap-highlight-color:transparent}
+.nav button{background:none;border:none;color:#7d8590;font-size:10px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px;font-family:inherit}
 .nav button.on{color:#00d4aa}
 .nav button i{font-size:20px;font-style:normal}
-.att-btn{padding:20px;border-radius:16px;cursor:pointer;text-align:center;border:none;width:100%;margin-bottom:12px;-webkit-tap-highlight-color:transparent;transition:transform .15s}
+.att-btn{padding:20px;border-radius:16px;cursor:pointer;text-align:center;border:none;width:100%;margin-bottom:12px}
 .att-btn:active{transform:scale(.97)}
 .loading{display:flex;align-items:center;justify-content:center;min-height:60vh;flex-direction:column;gap:16px}
 .spin{width:40px;height:40px;border:3px solid #30363d;border-top-color:#00d4aa;border-radius:50%;animation:sp .8s linear infinite}
@@ -51,20 +50,21 @@ document.documentElement.style.background="#0c1117";
 document.body.style.background="#0c1117";
 
 firebase.initializeApp({
-  apiKey:"AIzaSyAZDhBMSOvD2TrspiY5UxJWuFRbyW-uvk0",
-  authDomain:"ascent-digital-b5ca7.firebaseapp.com",
-  projectId:"ascent-digital-b5ca7",
-  storageBucket:"ascent-digital-b5ca7.firebasestorage.app",
-  messagingSenderId:"1057292144320",
-  appId:"1:1057292144320:web:8025b7e1be10f8541f6725"
+apiKey:"AIzaSyAZDhBMSOvD2TrspiY5UxJWuFRbyW-uvk0",
+authDomain:"ascent-digital-b5ca7.firebaseapp.com",
+projectId:"ascent-digital-b5ca7",
+storageBucket:"ascent-digital-b5ca7.firebasestorage.app",
+messagingSenderId:"1057292144320",
+appId:"1:1057292144320:web:8025b7e1be10f8541f6725"
 });
 
 var db=firebase.firestore();
 var empRef=db.collection('employees');
 var recRef=db.collection('attendance');
 var setRef=db.collection('settings').doc('main');
+var adjRef=db.collection('adjustments');
 
-var E=[],R={},S={lat:22.5726,lng:88.3639,radius:200,adminPwd:'ascent2026'};
+var E=[],R={},S={lat:22.5726,lng:88.3639,radius:200,adminPwd:'ascent2026'},ADJ={};
 var loaded=false;
 
 function fd(d){d=d||new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
@@ -74,6 +74,7 @@ function geoD(a,b){var R2=6371e3,toR=function(x){return x*Math.PI/180;};var dLat
 function showToast(t){var el=document.getElementById('toast');el.textContent=t;el.classList.add('on');setTimeout(function(){el.classList.remove('on');},3000);}
 function bn(){try{return new Date().toLocaleDateString('bn-IN',{weekday:'long',day:'numeric',month:'long',year:'numeric'});}catch(e){return fd();}}
 function timeNow(){return new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});}
+var mn=['January','February','March','April','May','June','July','August','September','October','November','December'];
 
 function loadAll(cb){
 var done=0;function chk(){done++;if(done>=3){loaded=true;if(cb)cb();}}
@@ -85,11 +86,14 @@ recRef.where('date','==',fd()).get().then(function(s){s.forEach(function(d){var 
 function loadRecsDate(dt,cb){recRef.where('date','==',dt).get().then(function(s){s.forEach(function(d){var o=d.data();o._id=d.id;R[o.empId+'_'+o.date]=o;});if(cb)cb();}).catch(function(){if(cb)cb();});}
 
 function loadRecsMonth(y,m,cb){
-var s2=y+'-'+String(m+1).padStart(2,'0')+'-01';var e2=y+'-'+String(m+1).padStart(2,'0')+'-'+String(dim(y,m)).padStart(2,'0');
-recRef.where('date','>=',s2).where('date','<=',e2).get().then(function(s){s.forEach(function(d){var o=d.data();o._id=d.id;R[o.empId+'_'+o.date]=o;});if(cb)cb();}).catch(function(){if(cb)cb();});
+var s2=y+'-'+String(m+1).padStart(2,'0')+'-01',e2=y+'-'+String(m+1).padStart(2,'0')+'-'+String(dim(y,m)).padStart(2,'0');
+recRef.where('date','>=',s2).where('date','<=',e2).get().then(function(s){s.forEach(function(d){var o=d.data();o._id=d.id;R[o.empId+'_'+o.date]=o;});
+adjRef.where('month','==',String(m+1).padStart(2,'0')).where('year','==',String(y)).get().then(function(as){as.forEach(function(ad){var ao=ad.data();ao._id=ad.id;ADJ[ao.empId+'_'+y+'_'+m]=ao;});if(cb)cb();}).catch(function(){if(cb)cb();});
+}).catch(function(){if(cb)cb();});
 }
 
 var mode=null,pg='dash',sStep='sel',selE=null,pin='',eId=null,attD=fd(),salM=new Date().getMonth(),salY=new Date().getFullYear();
+var viewEmpId=null; // for individual attendance view
 var app=document.getElementById('app');
 
 function render(){
@@ -98,6 +102,7 @@ if(!loaded){app.innerHTML='<div class="loading"><div class="spin"></div><p style
 if(!mode)rMode();else if(mode==='staff')rStaff();else rAdmin();
 }catch(e){app.innerHTML='<div style="padding:40px;text-align:center"><p style="color:#ff6b6b">Error: '+e.message+'</p><button class="btn bp" style="margin-top:20px;max-width:200px;margin-left:auto;margin-right:auto" onclick="location.reload()">Reload</button></div>';}}
 
+/* ===== HOME ===== */
 function rMode(){
 app.innerHTML='<div style="min-height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;padding:24px;background:#0c1117">'+
 '<div style="font-size:56px;margin-bottom:16px">🏢</div>'+
@@ -127,23 +132,23 @@ document.getElementById('aBk').onclick=function(){mode=null;render();};
 document.getElementById('aPwd').addEventListener('keyup',function(e){if(e.key==='Enter')document.getElementById('aLog').click();});
 }
 
+/* ===== STAFF MODE ===== */
 function rStaff(){
 var today=fd();
-var h='<div style="padding:16px 20px;border-bottom:1px solid #30363d;display:flex;align-items:center;gap:12px">'+
-'<button id="sBack" style="background:none;border:none;color:#7d8590;font-size:22px;cursor:pointer">←</button>'+
-'<div><div style="font-size:17px;font-weight:600;color:#e6edf3">👤 Staff Attendance</div>'+(selE?'<div style="color:#00d4aa;font-size:12px">'+selE.name+'</div>':'')+'</div></div>';
+var h='<div style="padding:16px 20px;border-bottom:1px solid #30363d;display:flex;align-items:center;gap:12px"><button id="sBack" style="background:none;border:none;color:#7d8590;font-size:22px;cursor:pointer">←</button><div><div style="font-size:17px;font-weight:600;color:#e6edf3">👤 Staff Attendance</div>'+(selE?'<div style="color:#00d4aa;font-size:12px">'+selE.name+'</div>':'')+'</div></div>';
 
 if(sStep==='sel'){
 h+='<div style="padding:24px 20px"><h2 class="df" style="font-size:20px;margin-bottom:4px;color:#e6edf3">Apnar Naam Select Korun</h2><p style="color:#7d8590;font-size:13px;margin-bottom:20px">'+bn()+'</p>';
 if(!E.length)h+='<p style="color:#7d8590;text-align:center;margin-top:40px">Admin ke bolun employee add korte</p>';
 else for(var i=0;i<E.length;i++){var e=E[i],rec=R[e.id+'_'+today],st=rec?(rec.status==='present'?'✅':rec.status==='half'?'🕐':'❌'):'';
-h+='<button data-i="'+e.id+'" class="eS" style="width:100%;padding:16px;margin-bottom:10px;border-radius:14px;border:1px solid #30363d;background:#161b22;cursor:pointer;display:flex;align-items:center;gap:14px;text-align:left"><div style="width:44px;height:44px;border-radius:12px;background:#00d4aa22;display:flex;align-items:center;justify-content:center;color:#00d4aa;font-weight:700;font-size:18px">'+e.name[0].toUpperCase()+'</div><div style="flex:1"><div style="color:#e6edf3;font-size:15px;font-weight:600">'+e.name+'</div><div style="color:#7d8590;font-size:12px">'+(e.salaryType==='monthly'?'₹'+e.salary+'/mo':'₹'+e.dailyRate+'/day')+'</div></div><span style="font-size:18px">'+st+'</span></button>';}
+h+='<button data-i="'+e.id+'" class="eS" style="width:100%;padding:16px;margin-bottom:10px;border-radius:14px;border:1px solid #30363d;background:#161b22;cursor:pointer;display:flex;align-items:center;gap:14px;text-align:left"><div style="width:44px;height:44px;border-radius:12px;background:#00d4aa22;display:flex;align-items:center;justify-content:center;color:#00d4aa;font-weight:700;font-size:18px">'+e.name[0].toUpperCase()+'</div><div style="flex:1"><div style="color:#e6edf3;font-size:15px;font-weight:600">'+e.name+'</div></div><span style="font-size:18px">'+st+'</span></button>';}
 h+='</div>';
 }else if(sStep==='pin'){
 h+='<div style="padding:24px 20px;text-align:center"><div style="width:72px;height:72px;border-radius:20px;background:#00d4aa22;margin:0 auto 16px;display:flex;align-items:center;justify-content:center;font-size:32px;color:#00d4aa">'+selE.name[0].toUpperCase()+'</div><h2 class="df" style="font-size:20px;margin-bottom:4px;color:#e6edf3">'+selE.name+'</h2><p style="color:#7d8590;font-size:13px;margin-bottom:28px">4-digit PIN deen</p><div style="display:flex;justify-content:center;gap:12px;margin-bottom:24px">';
 for(var d=0;d<4;d++)h+='<div style="width:48px;height:56px;border-radius:12px;border:2px solid '+(pin.length>d?'#00d4aa':'#30363d')+';background:'+(pin.length>d?'#00d4aa22':'#161b22')+';display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:700;color:#00d4aa">'+(pin[d]?'●':'')+'</div>';
 h+='</div><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;max-width:280px;margin:0 auto">';
-for(var n=0;n<12;n++){var nums=[1,2,3,4,5,6,7,8,9,'',0,'del'];if(nums[n]==='')h+='<div></div>';else h+='<button class="nB" data-v="'+nums[n]+'" style="padding:16px;font-size:22px;font-weight:600;border-radius:14px;border:1px solid #30363d;background:#161b22;color:#e6edf3;cursor:pointer">'+(nums[n]==='del'?'⌫':nums[n])+'</button>';}
+var nums=[1,2,3,4,5,6,7,8,9,'',0,'del'];
+for(var n=0;n<nums.length;n++){if(nums[n]==='')h+='<div></div>';else h+='<button class="nB" data-v="'+nums[n]+'" style="padding:16px;font-size:22px;font-weight:600;border-radius:14px;border:1px solid #30363d;background:#161b22;color:#e6edf3;cursor:pointer">'+(nums[n]==='del'?'⌫':nums[n])+'</button>';}
 h+='</div><button id="vBtn" class="btn bp" style="margin-top:20px;opacity:'+(pin.length===4?1:.5)+'">Verify →</button></div>';
 }else if(sStep==='mark'){
 var key=selE.id+'_'+today,rec=R[key];
@@ -152,8 +157,8 @@ if(rec){var col=rec.status==='present'?'#10b981':rec.status==='half'?'#fbbf24':'
 h+='<div style="padding:24px;border-radius:20px;margin-bottom:20px;background:'+bg+';border:1px solid '+col+'44"><div style="font-size:48px">'+(rec.status==='present'?'✅':rec.status==='half'?'🕐':'❌')+'</div><div style="font-size:18px;font-weight:700;margin-top:8px;color:'+col+'">'+(rec.status==='present'?'Present':rec.status==='half'?'Half Day':'Absent')+'</div><div style="color:#7d8590;font-size:13px;margin-top:4px">Ajker attendance deoa hoye geche</div><div style="color:#7d8590;font-size:12px;margin-top:6px">In: '+(rec.punchIn||'-')+(rec.punchOut?' | Out: '+rec.punchOut:'')+'</div></div>';
 if(!rec.punchOut)h+='<button id="poBtn" class="btn bs" style="border-color:#00d4aa55;color:#00d4aa">👋 Punch Out</button>';
 }else{
-h+='<button id="mP" class="att-btn" style="background:#10b98122;border:1px solid #10b98144"><div style="font-size:36px">✅</div><div style="font-size:17px;font-weight:700;color:#10b981;margin-top:6px">Present</div><div style="font-size:12px;color:#7d8590;margin-top:2px">Full day hajir</div></button>';
-h+='<button id="mH" class="att-btn" style="background:#fbbf2422;border:1px solid #fbbf2444"><div style="font-size:36px">🕐</div><div style="font-size:17px;font-weight:700;color:#fbbf24;margin-top:6px">Half Day</div><div style="font-size:12px;color:#7d8590;margin-top:2px">Adha din</div></button>';}
+h+='<button id="mP" class="att-btn" style="background:#10b98122;border:1px solid #10b98144"><div style="font-size:36px">✅</div><div style="font-size:17px;font-weight:700;color:#10b981;margin-top:6px">Present</div></button>';
+h+='<button id="mH" class="att-btn" style="background:#fbbf2422;border:1px solid #fbbf2444"><div style="font-size:36px">🕐</div><div style="font-size:17px;font-weight:700;color:#fbbf24;margin-top:6px">Half Day</div></button>';}
 h+='</div>';}
 
 app.innerHTML=h;
@@ -174,14 +179,38 @@ var d=geoD({lat:p.coords.latitude,lng:p.coords.longitude},{lat:S.lat,lng:S.lng})
 if(d>S.radius)return showToast('⛔ Office theke '+Math.round(d)+'m dure!');
 var data={empId:selE.id,empName:selE.name,date:fd(),status:st,punchIn:timeNow(),punchOut:'',lat:p.coords.latitude,lng:p.coords.longitude,ts:firebase.firestore.FieldValue.serverTimestamp()};
 showToast('💾 Saving...');
-recRef.add(data).then(function(doc){data._id=doc.id;R[selE.id+'_'+fd()]=data;showToast(st==='present'?'✅ Present!':'🕐 Half Day!');render();}).catch(function(e){showToast('❌ Error!');});
+recRef.add(data).then(function(doc){data._id=doc.id;R[selE.id+'_'+fd()]=data;showToast(st==='present'?'✅ Present!':'🕐 Half Day!');render();}).catch(function(){showToast('❌ Error!');});
 },function(){showToast('📍 Location ON korun!');},{enableHighAccuracy:true,timeout:15000});
 }
 
+/* ===== CALC SALARY ===== */
+function calcSal(e,y,m){
+var totalDays=dim(y,m);
+var pr2=0,hf2=0,ab2=0,sun=csun(y,m),td=new Date();
+for(var d=1;d<=totalDays;d++){
+if(new Date(y,m,d).getDay()===0)continue;
+var dt=y+'-'+String(m+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');
+var rec2=R[e.id+'_'+dt];
+if(rec2){if(rec2.status==='present')pr2++;else if(rec2.status==='half')hf2++;else ab2++;}
+else if(new Date(y,m,d)<=td)ab2++;
+}
+var adjKey=e.id+'_'+y+'_'+m;
+var adj=ADJ[adjKey]||{overtime:0,fine:0};
+var ot=parseFloat(adj.overtime)||0;
+var fine=parseFloat(adj.fine)||0;
+// FIXED: Monthly salary / 30 * effective days (not working days)
+var eff=pr2+hf2*0.5;
+var base=e.salaryType==='monthly'?Math.round((e.salary/30)*eff):Math.round(e.dailyRate*eff);
+var net=base+ot-fine;
+return {present:pr2,half:hf2,absent:ab2,effective:eff,base:base,overtime:ot,fine:fine,net:Math.max(0,net),sundays:sun,totalDays:totalDays};
+}
+
+/* ===== ADMIN MODE ===== */
 function rAdmin(){
 var today=fd(),h='';
 var navH='<nav class="nav"><button id="n1" class="'+(pg==='dash'?'on':'')+'"><i>📊</i>Home</button><button id="n2" class="'+(pg==='att'?'on':'')+'"><i>📋</i>Attend.</button><button id="n3" class="'+(pg==='staff'?'on':'')+'"><i>👥</i>Staff</button><button id="n4" class="'+(pg==='salary'?'on':'')+'"><i>💰</i>Salary</button><button id="n5" class="'+(pg==='set'?'on':'')+'"><i>⚙️</i>Settings</button></nav>';
 
+/* DASHBOARD */
 if(pg==='dash'){
 var pr=0,hf=0;for(var k in R)if(R[k].date===today){if(R[k].status==='present')pr++;else if(R[k].status==='half')hf++;}
 var ab=Math.max(0,E.length-pr-hf);
@@ -193,58 +222,107 @@ else for(var i=0;i<E.length;i++){var e=E[i],rec=R[e.id+'_'+today],st2=rec?(rec.s
 h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;'+(i<E.length-1?'border-bottom:1px solid #30363d':'')+'"><div><div style="font-size:14px;font-weight:500;color:#e6edf3">'+e.name+'</div><div style="color:#7d8590;font-size:11px">'+(rec?'In: '+(rec.punchIn||'-')+' | Out: '+(rec.punchOut||'-'):'Not marked')+'</div></div><span style="font-size:16px">'+st2+'</span></div>';}
 h+='</div>';
 }
+
+/* ATTENDANCE */
 else if(pg==='att'){
-h+='<h2 class="df" style="font-size:20px;margin-bottom:16px;color:#e6edf3">📋 Attendance Register</h2><input type="date" id="aD" value="'+attD+'"><div class="card">';
+if(viewEmpId){
+// INDIVIDUAL MONTH VIEW
+var ve=null;for(var i=0;i<E.length;i++)if(E[i].id===viewEmpId){ve=E[i];break;}
+if(!ve){viewEmpId=null;render();return;}
+h+='<div style="display:flex;align-items:center;gap:10px;margin-bottom:16px"><button id="attBackBtn" style="background:none;border:none;color:#7d8590;font-size:20px;cursor:pointer">←</button><h2 class="df" style="font-size:18px;color:#e6edf3">'+ve.name+' — '+mn[salM]+' '+salY+'</h2></div>';
+var mO='',yO='';for(var i=0;i<mn.length;i++)mO+='<option value="'+i+'"'+(i===salM?' selected':'')+'>'+mn[i]+'</option>';
+for(var yr=2024;yr<=2027;yr++)yO+='<option value="'+yr+'"'+(yr===salY?' selected':'')+'>'+yr+'</option>';
+h+='<div style="display:flex;gap:8px;margin-bottom:12px"><select id="vM">'+mO+'</select><select id="vY" style="flex:.6">'+yO+'</select></div>';
+var dayNames=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+h+='<div class="card" style="padding:10px">';
+for(var d=1;d<=dim(salY,salM);d++){
+var dt=salY+'-'+String(salM+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');
+var rec=R[ve.id+'_'+dt];
+var isSun=new Date(salY,salM,d).getDay()===0;
+var dayN=dayNames[new Date(salY,salM,d).getDay()];
+var stIcon=isSun?'🔵':rec?(rec.status==='present'?'✅':rec.status==='half'?'🕐':'❌'):'⬜';
+var stText=isSun?'Sunday':rec?(rec.status==='present'?'Present':rec.status==='half'?'Half Day':'Absent'):'—';
+var stCol=isSun?'#60a5fa':rec?(rec.status==='present'?'#10b981':rec.status==='half'?'#fbbf24':'#ff6b6b'):'#7d8590';
+var timeInfo=rec&&rec.punchIn?rec.punchIn+(rec.punchOut?' → '+rec.punchOut:''):'';
+h+='<div style="display:flex;align-items:center;padding:8px 6px;'+(d<dim(salY,salM)?'border-bottom:1px solid #30363d22':'')+'"><div style="width:28px;font-size:13px;color:#7d8590;font-weight:600">'+d+'</div><div style="width:36px;font-size:11px;color:#7d8590">'+dayN+'</div><div style="flex:1;font-size:13px;color:'+stCol+'">'+stIcon+' '+stText+'</div><div style="font-size:11px;color:#7d8590">'+timeInfo+'</div></div>';
+}
+h+='</div>';
+var sc=calcSal(ve,salY,salM);
+h+='<div class="card" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;text-align:center"><div><div style="font-size:18px;font-weight:700;color:#10b981">'+sc.present+'</div><div style="font-size:10px;color:#7d8590">Present</div></div><div><div style="font-size:18px;font-weight:700;color:#fbbf24">'+sc.half+'</div><div style="font-size:10px;color:#7d8590">Half</div></div><div><div style="font-size:18px;font-weight:700;color:#ff6b6b">'+sc.absent+'</div><div style="font-size:10px;color:#7d8590">Absent</div></div></div>';
+}else{
+// DATE WISE REGISTER
+h+='<h2 class="df" style="font-size:20px;margin-bottom:16px;color:#e6edf3">📋 Attendance Register</h2><input type="date" id="aD" value="'+attD+'">';
+h+='<div class="card">';
 if(!E.length)h+='<p style="color:#7d8590">Staff add korun</p>';
 else for(var i=0;i<E.length;i++){var e=E[i],k2=e.id+'_'+attD,rec=R[k2];
-h+='<div style="padding:12px 0;'+(i<E.length-1?'border-bottom:1px solid #30363d':'')+';display:flex;justify-content:space-between;align-items:center"><div style="font-size:14px;font-weight:500;color:#e6edf3">'+e.name+'</div><div style="display:flex;gap:6px">';
+h+='<div style="padding:12px 0;'+(i<E.length-1?'border-bottom:1px solid #30363d':'')+';display:flex;justify-content:space-between;align-items:center">';
+h+='<div style="flex:1"><div style="font-size:14px;font-weight:500;color:#e6edf3">'+e.name+'</div></div>';
+h+='<div style="display:flex;gap:6px;align-items:center">';
 var ts=['present','half','absent'];for(var t=0;t<ts.length;t++){var ty=ts[t],ac=rec&&rec.status===ty,col=ty==='present'?'#10b981':ty==='half'?'#fbbf24':'#ff6b6b',bg2=ac?(ty==='present'?'#10b98122':ty==='half'?'#fbbf2422':'#ff6b6b22'):'transparent',lb=ty==='present'?'✅P':ty==='half'?'🕐H':'❌A';
 h+='<button data-e="'+e.id+'" data-d="'+attD+'" data-t="'+ty+'" class="aM" style="padding:6px 10px;font-size:11px;border-radius:8px;cursor:pointer;border:'+(ac?'2px solid '+col:'1px solid #30363d')+';background:'+bg2+';color:'+col+'">'+lb+'</button>';}
+h+='<button data-e="'+e.id+'" class="viewEmpBtn" style="background:none;border:none;font-size:14px;cursor:pointer;margin-left:4px" title="View month">📅</button>';
 h+='</div></div>';}
 h+='</div>';
 }
-else if(pg==='staff'){
-h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2 class="df" style="font-size:20px;color:#e6edf3">👥 Staff ('+E.length+')</h2><button id="addE" class="btn bp" style="width:auto;padding:8px 16px;font-size:13px">+ Add</button></div><div id="eFA"></div>';
-for(var i=0;i<E.length;i++){var e=E[i];
-h+='<div style="background:#161b22;border-radius:14px;padding:14px 16px;margin-bottom:10px;border:1px solid #30363d;display:flex;justify-content:space-between;align-items:center"><div><div style="font-size:15px;font-weight:500;color:#e6edf3">'+e.name+'</div><div style="color:#7d8590;font-size:12px">📱'+(e.phone||'-')+' | '+(e.salaryType==='monthly'?'₹'+e.salary+'/mo':'₹'+e.dailyRate+'/day')+' | PIN:'+(e.pin||'-')+'</div></div><div style="display:flex;gap:8px"><button data-e="'+e.id+'" class="edE" style="background:none;border:none;font-size:16px;cursor:pointer">✏️</button><button data-e="'+e.id+'" class="dlE" style="background:none;border:none;font-size:16px;cursor:pointer">🗑️</button></div></div>';}
-if(!E.length)h+='<p style="color:#7d8590;text-align:center;margin-top:40px">+ Add button e staff add korun</p>';
 }
+
+/* STAFF - FIXED: stable rendering */
+else if(pg==='staff'){
+h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2 class="df" style="font-size:20px;color:#e6edf3">👥 Staff ('+E.length+')</h2><button id="addE" class="btn bp" style="width:auto;padding:8px 16px;font-size:13px">+ Add</button></div>';
+h+='<div id="eFA"></div>';
+if(!E.length)h+='<p style="color:#7d8590;text-align:center;margin-top:40px">+ Add button e staff add korun</p>';
+else{
+for(var i=0;i<E.length;i++){var e=E[i];
+h+='<div class="card" style="display:flex;justify-content:space-between;align-items:center"><div style="flex:1"><div style="font-size:15px;font-weight:600;color:#e6edf3">'+e.name+'</div><div style="color:#7d8590;font-size:12px;margin-top:2px">📱 '+(e.phone||'-')+'</div><div style="color:#7d8590;font-size:12px">'+(e.salaryType==='monthly'?'₹'+e.salary+'/month':'₹'+e.dailyRate+'/day')+' | PIN: '+(e.pin||'-')+'</div></div><div style="display:flex;gap:10px"><button data-e="'+e.id+'" class="edE" style="background:none;border:none;font-size:18px;cursor:pointer">✏️</button><button data-e="'+e.id+'" class="dlE" style="background:none;border:none;font-size:18px;cursor:pointer">🗑️</button></div></div>';
+}}
+}
+
+/* SALARY - FIXED: /30 calculation + overtime + fine + slip download */
 else if(pg==='salary'){
-var wd=dim(salY,salM)-csun(salY,salM),mn=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'],mO='',yO='';
-for(var i=0;i<mn.length;i++)mO+='<option value="'+i+'"'+(i===salM?' selected':'')+'>'+mn[i]+'</option>';
+var wd=dim(salY,salM)-csun(salY,salM);
+var mO='',yO='';for(var i=0;i<mn.length;i++)mO+='<option value="'+i+'"'+(i===salM?' selected':'')+'>'+mn[i]+'</option>';
 for(var yr=2024;yr<=2027;yr++)yO+='<option value="'+yr+'"'+(yr===salY?' selected':'')+'>'+yr+'</option>';
-h+='<h2 class="df" style="font-size:20px;margin-bottom:16px;color:#e6edf3">💰 Salary Report</h2><div style="display:flex;gap:8px;margin-bottom:16px"><select id="sM">'+mO+'</select><select id="sY" style="flex:0.6">'+yO+'</select></div>';
-h+='<div class="card" style="display:flex;justify-content:space-around"><div style="text-align:center"><div style="font-size:18px;font-weight:700;color:#e6edf3">'+dim(salY,salM)+'</div><div style="font-size:10px;color:#7d8590">Total</div></div><div style="text-align:center"><div style="font-size:18px;font-weight:700;color:#00d4aa">'+wd+'</div><div style="font-size:10px;color:#7d8590">Working</div></div><div style="text-align:center"><div style="font-size:18px;font-weight:700;color:#fbbf24">'+csun(salY,salM)+'</div><div style="font-size:10px;color:#7d8590">Sundays</div></div></div>';
+h+='<h2 class="df" style="font-size:20px;margin-bottom:16px;color:#e6edf3">💰 Salary Report</h2><div style="display:flex;gap:8px;margin-bottom:16px"><select id="sM">'+mO+'</select><select id="sY" style="flex:.6">'+yO+'</select></div>';
+h+='<div class="card" style="display:flex;justify-content:space-around"><div style="text-align:center"><div style="font-size:18px;font-weight:700;color:#e6edf3">'+dim(salY,salM)+'</div><div style="font-size:10px;color:#7d8590">Total Days</div></div><div style="text-align:center"><div style="font-size:18px;font-weight:700;color:#00d4aa">'+wd+'</div><div style="font-size:10px;color:#7d8590">Working</div></div><div style="text-align:center"><div style="font-size:18px;font-weight:700;color:#fbbf24">'+csun(salY,salM)+'</div><div style="font-size:10px;color:#7d8590">Sundays</div></div></div>';
 var total=0;
-for(var i=0;i<E.length;i++){var e=E[i],pr2=0,hf2=0,ab2=0,td=new Date();
-for(var d=1;d<=dim(salY,salM);d++){if(new Date(salY,salM,d).getDay()===0)continue;var dt=salY+'-'+String(salM+1).padStart(2,'0')+'-'+String(d).padStart(2,'0'),rec2=R[e.id+'_'+dt];
-if(rec2){if(rec2.status==='present')pr2++;else if(rec2.status==='half')hf2++;else ab2++;}else if(new Date(salY,salM,d)<td)ab2++;}
-var eff=pr2+hf2*.5,sal2=e.salaryType==='monthly'?Math.round((e.salary/(wd||1))*eff):Math.round(e.dailyRate*eff);total+=sal2;
-h+='<div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:10px"><div><div style="font-size:15px;font-weight:600;color:#e6edf3">'+e.name+'</div><div style="color:#7d8590;font-size:11px">'+(e.salaryType==='monthly'?'Base: ₹'+e.salary:'Rate: ₹'+e.dailyRate+'/day')+'</div></div><div style="text-align:right"><div style="color:#00d4aa;font-size:20px;font-weight:700">₹'+sal2.toLocaleString('en-IN')+'</div><div style="color:#7d8590;font-size:11px">Payable</div></div></div>';
-h+='<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px;background:#0c1117;border-radius:10px;padding:10px"><div style="text-align:center"><div style="font-size:16px;font-weight:700;color:#e6edf3">'+wd+'</div><div style="font-size:10px;color:#7d8590">Working</div></div><div style="text-align:center"><div style="font-size:16px;font-weight:700;color:#10b981">'+pr2+'</div><div style="font-size:10px;color:#7d8590">Present</div></div><div style="text-align:center"><div style="font-size:16px;font-weight:700;color:#fbbf24">'+hf2+'</div><div style="font-size:10px;color:#7d8590">Half</div></div><div style="text-align:center"><div style="font-size:16px;font-weight:700;color:#ff6b6b">'+ab2+'</div><div style="font-size:10px;color:#7d8590">Absent</div></div></div></div>';}
+for(var i=0;i<E.length;i++){var e=E[i];
+var sc=calcSal(e,salY,salM);total+=sc.net;
+h+='<div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:10px"><div><div style="font-size:15px;font-weight:600;color:#e6edf3">'+e.name+'</div><div style="color:#7d8590;font-size:11px">'+(e.salaryType==='monthly'?'Base: ₹'+e.salary+'/mo (÷30)':'Rate: ₹'+e.dailyRate+'/day')+'</div></div><div style="text-align:right"><div style="color:#00d4aa;font-size:20px;font-weight:700">₹'+sc.net.toLocaleString('en-IN')+'</div><div style="color:#7d8590;font-size:11px">Net Pay</div></div></div>';
+h+='<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px;background:#0c1117;border-radius:10px;padding:10px;margin-bottom:10px"><div style="text-align:center"><div style="font-size:14px;font-weight:700;color:#10b981">'+sc.present+'</div><div style="font-size:10px;color:#7d8590">Present</div></div><div style="text-align:center"><div style="font-size:14px;font-weight:700;color:#fbbf24">'+sc.half+'</div><div style="font-size:10px;color:#7d8590">Half</div></div><div style="text-align:center"><div style="font-size:14px;font-weight:700;color:#ff6b6b">'+sc.absent+'</div><div style="font-size:10px;color:#7d8590">Absent</div></div><div style="text-align:center"><div style="font-size:14px;font-weight:700;color:#e6edf3">'+sc.effective+'</div><div style="font-size:10px;color:#7d8590">Effective</div></div></div>';
+// Overtime & Fine
+h+='<div style="display:flex;gap:6px;margin-bottom:8px"><div style="flex:1;display:flex;align-items:center;gap:4px"><span style="color:#10b981;font-size:12px">OT ₹</span><input data-eid="'+e.id+'" class="otIn" type="number" placeholder="0" value="'+(sc.overtime||'')+'" style="margin:0;padding:8px;font-size:13px"></div><div style="flex:1;display:flex;align-items:center;gap:4px"><span style="color:#ff6b6b;font-size:12px">Fine ₹</span><input data-eid="'+e.id+'" class="fnIn" type="number" placeholder="0" value="'+(sc.fine||'')+'" style="margin:0;padding:8px;font-size:13px"></div></div>';
+h+='<div style="display:flex;gap:6px"><button data-eid="'+e.id+'" class="saveAdj btn bp" style="padding:8px;font-size:12px">Save OT/Fine</button><button data-eid="'+e.id+'" class="dlSlip btn bs" style="padding:8px;font-size:12px;width:auto;flex:1">📄 Slip</button></div>';
+h+='</div>';}
 if(E.length)h+='<div style="background:#00d4aa22;border-radius:14px;padding:16px;border:1px solid #00d4aa44;text-align:center"><div style="color:#7d8590;font-size:13px">Total Monthly Payout</div><div style="color:#00d4aa;font-size:28px;font-weight:700">₹'+total.toLocaleString('en-IN')+'</div></div>';
 }
+
+/* SETTINGS */
 else if(pg==='set'){
 h+='<h2 class="df" style="font-size:20px;margin-bottom:16px;color:#e6edf3">⚙️ Settings</h2>'+
 '<div class="card"><h3 style="color:#00d4aa;font-size:14px;margin-bottom:12px">📍 Office Geo-fence</h3><button id="scL" class="btn bp" style="margin-bottom:12px">📍 Current Location = Office</button><div style="display:flex;gap:8px"><div style="flex:1"><label style="color:#7d8590;font-size:11px">Lat</label><input id="sLa" type="number" step="any" value="'+S.lat+'"></div><div style="flex:1"><label style="color:#7d8590;font-size:11px">Lng</label><input id="sLo" type="number" step="any" value="'+S.lng+'"></div></div><label style="color:#7d8590;font-size:11px">Radius (meters)</label><input id="sR" type="number" value="'+S.radius+'"><button id="svS" class="btn bp">Save Location ✅</button></div>'+
 '<div class="card"><h3 style="color:#00d4aa;font-size:14px;margin-bottom:12px">🔐 Admin Password</h3><input id="nPwd" type="password" placeholder="New password likhun"><button id="chPwd" class="btn bp">Password Change ✅</button></div>'+
 '<div class="card"><h3 style="color:#00d4aa;font-size:14px;margin-bottom:12px">📁 Backup</h3><button id="exB" class="btn bp">📤 Export JSON</button></div>'+
-'<div class="card" style="border-color:#ff6b6b33"><button id="clB" style="color:#ff6b6b;border:1px solid #ff6b6b;background:transparent;width:100%;padding:14px;border-radius:12px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit">🗑️ Clear All Data</button></div>'+
+'<div class="card" style="border-color:#ff6b6b33"><button id="clB" style="color:#ff6b6b;border:1px solid #ff6b6b;background:transparent;width:100%;padding:14px;border-radius:12px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit">🗑️ Clear All</button></div>'+
 '<div style="background:#10b98122;border-radius:10px;padding:12px;margin-top:12px"><p style="color:#10b981;font-size:12px;text-align:center;line-height:1.7">🟢 Firebase Cloud Active<br>Data Google server e safe ache</p></div>';
 }
 
 app.innerHTML='<div style="padding:20px 16px 100px">'+h+'</div>'+navH;
+bindAdmin();
+}
 
+function bindAdmin(){
+var today=fd();
 document.getElementById('n1').onclick=function(){pg='dash';loadRecsDate(fd(),render);};
-document.getElementById('n2').onclick=function(){pg='att';render();};
-document.getElementById('n3').onclick=function(){pg='staff';render();};
+document.getElementById('n2').onclick=function(){pg='att';viewEmpId=null;render();};
+document.getElementById('n3').onclick=function(){pg='staff';eId=null;render();};
 document.getElementById('n4').onclick=function(){pg='salary';loadRecsMonth(salY,salM,render);};
 document.getElementById('n5').onclick=function(){pg='set';render();};
 
 var bk=document.getElementById('bk');if(bk)bk.onclick=function(){mode=null;render();};
-var ref=document.getElementById('refBtn');if(ref)ref.onclick=function(){showToast('🔄 Refreshing...');loadRecsDate(fd(),function(){showToast('✅ Updated!');render();});};
-var aD2=document.getElementById('aD');if(aD2)aD2.onchange=function(){attD=this.value;loadRecsDate(attD,render);};
+var ref=document.getElementById('refBtn');if(ref)ref.onclick=function(){showToast('🔄...');loadRecsDate(fd(),function(){showToast('✅ Updated!');render();});};
 
+// Attendance
+var aD2=document.getElementById('aD');if(aD2)aD2.onchange=function(){attD=this.value;loadRecsDate(attD,render);};
 var aMBs=document.querySelectorAll('.aM');for(var a=0;a<aMBs.length;a++)aMBs[a].onclick=function(){
 var eid=this.getAttribute('data-e'),dt=this.getAttribute('data-d'),ty=this.getAttribute('data-t'),k=eid+'_'+dt,ex=R[k];
 var data={empId:eid,date:dt,status:ty,punchIn:'Manual',punchOut:'',ts:firebase.firestore.FieldValue.serverTimestamp()};
@@ -252,20 +330,76 @@ for(var j=0;j<E.length;j++)if(E[j].id===eid){data.empName=E[j].name;break;}
 if(ex&&ex._id){recRef.doc(ex._id).update({status:ty}).then(function(){ex.status=ty;showToast(ty+' ✅');render();});}
 else{recRef.add(data).then(function(doc){data._id=doc.id;R[k]=data;showToast(ty+' ✅');render();});}};
 
+// View individual attendance
+var veBtns=document.querySelectorAll('.viewEmpBtn');for(var ve=0;ve<veBtns.length;ve++)veBtns[ve].onclick=function(){
+viewEmpId=this.getAttribute('data-e');loadRecsMonth(salY,salM,render);};
+var attBack=document.getElementById('attBackBtn');if(attBack)attBack.onclick=function(){viewEmpId=null;render();};
+var vMEl=document.getElementById('vM');if(vMEl)vMEl.onchange=function(){salM=parseInt(this.value);loadRecsMonth(salY,salM,render);};
+var vYEl=document.getElementById('vY');if(vYEl)vYEl.onchange=function(){salY=parseInt(this.value);loadRecsMonth(salY,salM,render);};
+
+// Staff - FIXED: proper binding
 var addE=document.getElementById('addE');if(addE)addE.onclick=function(){eId=null;showEF();};
 var edBs=document.querySelectorAll('.edE');for(var eb=0;eb<edBs.length;eb++)edBs[eb].onclick=function(){eId=this.getAttribute('data-e');showEF();};
 var dlBs=document.querySelectorAll('.dlE');for(var db2=0;db2<dlBs.length;db2++)dlBs[db2].onclick=function(){var eid=this.getAttribute('data-e');if(confirm('Delete korben?')){empRef.doc(eid).delete().then(function(){E=E.filter(function(x){return x.id!==eid;});showToast('🗑️ Deleted');render();});}};
 
+// Salary
 var sME=document.getElementById('sM');if(sME)sME.onchange=function(){salM=parseInt(this.value);loadRecsMonth(salY,salM,render);};
 var sYE=document.getElementById('sY');if(sYE)sYE.onchange=function(){salY=parseInt(this.value);loadRecsMonth(salY,salM,render);};
 
+// Save OT/Fine
+var saveBtns=document.querySelectorAll('.saveAdj');for(var sb=0;sb<saveBtns.length;sb++)saveBtns[sb].onclick=function(){
+var eid=this.getAttribute('data-eid');
+var otVal=0,fnVal=0;
+var otIns=document.querySelectorAll('.otIn');for(var oi=0;oi<otIns.length;oi++)if(otIns[oi].getAttribute('data-eid')===eid)otVal=parseFloat(otIns[oi].value)||0;
+var fnIns=document.querySelectorAll('.fnIn');for(var fi=0;fi<fnIns.length;fi++)if(fnIns[fi].getAttribute('data-eid')===eid)fnVal=parseFloat(fnIns[fi].value)||0;
+var adjKey=eid+'_'+salY+'_'+salM;
+var data={empId:eid,year:String(salY),month:String(salM+1).padStart(2,'0'),overtime:otVal,fine:fnVal};
+if(ADJ[adjKey]&&ADJ[adjKey]._id){adjRef.doc(ADJ[adjKey]._id).update(data).then(function(){ADJ[adjKey]=data;showToast('✅ Saved!');render();});}
+else{adjRef.add(data).then(function(doc){data._id=doc.id;ADJ[adjKey]=data;showToast('✅ Saved!');render();});}
+};
+
+// Salary Slip Download
+var slipBtns=document.querySelectorAll('.dlSlip');for(var sl=0;sl<slipBtns.length;sl++)slipBtns[sl].onclick=function(){
+var eid=this.getAttribute('data-eid');var emp=null;for(var j=0;j<E.length;j++)if(E[j].id===eid){emp=E[j];break;}
+if(!emp)return;
+var sc=calcSal(emp,salY,salM);
+var slip='╔══════════════════════════════════════╗\n';
+slip+='║     ASCENT DIGITAL CREATION          ║\n';
+slip+='║          SALARY SLIP                 ║\n';
+slip+='╠══════════════════════════════════════╣\n';
+slip+='║ Month  : '+mn[salM]+' '+salY+'                   \n';
+slip+='║ Name   : '+emp.name+'                     \n';
+slip+='║ Phone  : '+(emp.phone||'-')+'                    \n';
+slip+='╠══════════════════════════════════════╣\n';
+slip+='║ Total Days    : '+sc.totalDays+'                    \n';
+slip+='║ Sundays       : '+sc.sundays+'                     \n';
+slip+='║ Present       : '+sc.present+'                     \n';
+slip+='║ Half Day      : '+sc.half+'                      \n';
+slip+='║ Absent        : '+sc.absent+'                     \n';
+slip+='║ Effective Days: '+sc.effective+'                   \n';
+slip+='╠══════════════════════════════════════╣\n';
+slip+='║ '+(emp.salaryType==='monthly'?'Monthly Salary : ₹'+emp.salary+' (÷30)':'Daily Rate     : ₹'+emp.dailyRate)+'\n';
+slip+='║ Base Pay      : ₹'+sc.base.toLocaleString('en-IN')+'              \n';
+slip+='║ Overtime (+)  : ₹'+sc.overtime.toLocaleString('en-IN')+'              \n';
+slip+='║ Fine (-)      : ₹'+sc.fine.toLocaleString('en-IN')+'              \n';
+slip+='╠══════════════════════════════════════╣\n';
+slip+='║ NET PAYABLE   : ₹'+sc.net.toLocaleString('en-IN')+'              \n';
+slip+='╚══════════════════════════════════════╝\n';
+slip+='\nGenerated: '+new Date().toLocaleString('en-IN');
+var blob=new Blob([slip],{type:'text/plain'});var a=document.createElement('a');
+a.href=URL.createObjectURL(blob);a.download=emp.name.replace(/\s/g,'_')+'_salary_'+mn[salM]+'_'+salY+'.txt';a.click();
+showToast('📄 Slip downloaded!');
+};
+
+// Settings
 var scL=document.getElementById('scL');if(scL)scL.onclick=function(){if(!navigator.geolocation)return showToast('GPS nai!');showToast('📍 Getting...');navigator.geolocation.getCurrentPosition(function(p){S.lat=p.coords.latitude;S.lng=p.coords.longitude;setRef.set({lat:S.lat,lng:S.lng,radius:S.radius,adminPwd:S.adminPwd},{merge:true}).then(function(){showToast('📍 Office set!');render();});},function(){showToast('Error!');},{enableHighAccuracy:true});};
 var svS=document.getElementById('svS');if(svS)svS.onclick=function(){S.lat=parseFloat(document.getElementById('sLa').value);S.lng=parseFloat(document.getElementById('sLo').value);S.radius=parseInt(document.getElementById('sR').value)||200;setRef.set({lat:S.lat,lng:S.lng,radius:S.radius,adminPwd:S.adminPwd},{merge:true}).then(function(){showToast('⚙️ Saved!');});};
 var chP=document.getElementById('chPwd');if(chP)chP.onclick=function(){var np=document.getElementById('nPwd').value;if(!np||np.length<4)return showToast('Min 4 char!');S.adminPwd=np;setRef.set({adminPwd:np},{merge:true}).then(function(){showToast('🔐 Changed!');document.getElementById('nPwd').value='';});};
-var exB=document.getElementById('exB');if(exB)exB.onclick=function(){var d=JSON.stringify({employees:E,records:R,settings:S},null,2),b=new Blob([d],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='ascent_backup_'+fd()+'.json';a.click();showToast('📤 Exported!');};
-var clB=document.getElementById('clB');if(clB)clB.onclick=function(){if(confirm('SHOB data delete hobe!!')){empRef.get().then(function(s){s.forEach(function(d){d.ref.delete();});});recRef.get().then(function(s){s.forEach(function(d){d.ref.delete();});});E=[];R={};showToast('🗑️ Cleared!');render();}};
+var exB=document.getElementById('exB');if(exB)exB.onclick=function(){var d=JSON.stringify({employees:E,records:R,adjustments:ADJ,settings:S},null,2),b=new Blob([d],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='ascent_backup_'+fd()+'.json';a.click();showToast('📤 Exported!');};
+var clB=document.getElementById('clB');if(clB)clB.onclick=function(){if(confirm('SHOB data delete hobe!!')){empRef.get().then(function(s){s.forEach(function(d){d.ref.delete();});});recRef.get().then(function(s){s.forEach(function(d){d.ref.delete();});});adjRef.get().then(function(s){s.forEach(function(d){d.ref.delete();});});E=[];R={};ADJ={};showToast('🗑️ Cleared!');render();}};
 }
 
+/* ===== EMPLOYEE FORM ===== */
 function showEF(){
 var e=eId?null:{name:'',phone:'',salaryType:'monthly',salary:'',dailyRate:'',pin:''};
 if(eId){for(var i=0;i<E.length;i++)if(E[i].id===eId){e=E[i];break;}}if(!e)return;
@@ -282,9 +416,9 @@ var sal=parseFloat(document.getElementById('fsa').value)||0,daily=parseFloat(doc
 if(!name)return showToast('Naam likhun!');if(!pinV||pinV.length!==4)return showToast('4 digit PIN deen!');
 var data={name:name,phone:phone,salaryType:ftype,salary:sal,dailyRate:daily,pin:pinV};
 showToast('💾 Saving...');
-if(eId){empRef.doc(eId).update(data).then(function(){for(var i=0;i<E.length;i++)if(E[i].id===eId){data.id=eId;E[i]=data;break;}showToast('✅ Updated!');eId=null;render();}).catch(function(e){showToast('Error!');});}
-else{empRef.add(data).then(function(doc){data.id=doc.id;E.push(data);showToast('✅ Added!');eId=null;render();}).catch(function(e){showToast('Error!');});}};
-document.getElementById('cnE').onclick=function(){eId=null;area.innerHTML='';};
+if(eId){empRef.doc(eId).update(data).then(function(){for(var i=0;i<E.length;i++)if(E[i].id===eId){data.id=eId;E[i]=data;break;}showToast('✅ Updated!');eId=null;render();}).catch(function(){showToast('Error!');});}
+else{empRef.add(data).then(function(doc){data.id=doc.id;E.push(data);showToast('✅ Added!');eId=null;render();}).catch(function(){showToast('Error!');});}};
+document.getElementById('cnE').onclick=function(){eId=null;render();};
 }
 
 loadAll(function(){render();});
