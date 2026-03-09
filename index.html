@@ -81,7 +81,25 @@ app.innerHTML='<div style="min-height:100vh;display:flex;flex-direction:column;j
 '<p style="color:#7d8590;font-size:11px;margin-top:44px;text-align:center;line-height:1.8">Admin → Staff manage, attendance, salary<br>Staff → Geo-fenced attendance</p>'+
 (!canLS?'<p style="color:#fbbf24;font-size:11px;margin-top:16px;text-align:center;background:#fbbf2415;padding:8px 16px;border-radius:8px">⚠️ Preview mode — real site e data save hobe</p>':'')+
 '</div>';
-document.getElementById('bA').onclick=function(){mode='admin';pg='dash';render();};
+document.getElementById('bA').onclick=function(){showAdminLogin();};
+function showAdminLogin(){
+var adminPwd=lsG('adminpwd','ascent2026');
+app.innerHTML='<div style="min-height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;padding:24px;background:#0c1117">'+
+'<div style="font-size:48px;margin-bottom:16px">🔐</div>'+
+'<h2 class="df" style="font-size:22px;margin-bottom:6px;color:#e6edf3">Admin Login</h2>'+
+'<p style="color:#7d8590;font-size:13px;margin-bottom:28px">Admin password deen</p>'+
+'<div style="width:100%;max-width:320px">'+
+'<input id="adminPwdInput" type="password" placeholder="Password" style="text-align:center;font-size:18px;letter-spacing:4px">'+
+'<button id="adminLoginBtn" class="btn bp" style="margin-bottom:12px">Login →</button>'+
+'<button id="adminBackBtn" class="btn bs">← Back</button></div>'+
+'<p style="color:#7d8590;font-size:11px;margin-top:24px;text-align:center">Default password: ascent2026<br>Settings e change korte parben</p></div>';
+document.getElementById('adminLoginBtn').onclick=function(){
+var inp=document.getElementById('adminPwdInput').value;
+if(inp===adminPwd){mode='admin';pg='dash';render();}
+else{showToast('❌ Wrong password!');}};
+document.getElementById('adminBackBtn').onclick=function(){mode=null;render();};
+document.getElementById('adminPwdInput').addEventListener('keyup',function(e){if(e.key==='Enter')document.getElementById('adminLoginBtn').click();});
+}
 document.getElementById('bS').onclick=function(){mode='staff';sStep='sel';selE=null;pin='';render();};
 }
 
@@ -262,6 +280,9 @@ h+='<h2 class="df" style="font-size:20px;margin-bottom:16px;color:#e6edf3">⚙�
 '<div class="card"><h3 style="color:#00d4aa;font-size:14px;margin-bottom:12px">📁 Backup</h3>'+
 '<button id="exB" class="btn bp" style="margin-bottom:8px">📤 Export</button>'+
 '<label class="btn bs" style="cursor:pointer">📥 Import<input type="file" id="imF" accept=".json" style="display:none"></label></div>'+
+'<div class="card"><h3 style="color:#00d4aa;font-size:14px;margin-bottom:12px">🔐 Admin Password</h3>'+
+'<input id="newPwd" type="password" placeholder="New password likhun">'+
+'<button id="chPwd" class="btn bp">Password Change ✅</button></div>'+
 '<div class="card" style="border-color:#ff6b6b33"><button id="clB" style="color:#ff6b6b;border:1px solid #ff6b6b;background:transparent;width:100%;padding:14px;border-radius:12px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit">🗑️ Clear All Data</button></div>'+
 '<p style="color:#7d8590;font-size:11px;margin-top:16px;text-align:center;line-height:1.7">Staff der ei website er link share korun<br>Ora "Staff Attendance" mode select korbe<br>PIN diye geo-fenced attendance dibe</p>';
 }
@@ -302,6 +323,7 @@ var imF=document.getElementById('imF');if(imF)imF.onchange=function(ev){
 var f=ev.target.files[0];if(!f)return;var r=new FileReader();
 r.onload=function(e){try{var d=JSON.parse(e.target.result);if(d.employees)E=d.employees;if(d.records)R=d.records;
 if(d.settings)S=d.settings;sv();showToast('📥 Imported!');render();}catch(er){showToast('File error!')}};r.readAsText(f);};
+var chPwd=document.getElementById('chPwd');if(chPwd)chPwd.onclick=function(){var np=document.getElementById('newPwd').value;if(!np||np.length<4){showToast('Minimum 4 character deen!');return;}lsS('adminpwd',np);showToast('🔐 Password changed!');document.getElementById('newPwd').value='';};
 var clB=document.getElementById('clB');if(clB)clB.onclick=function(){if(confirm('SHOB data delete hobe!!')){E=[];R={};sv();showToast('🗑️ Cleared!');render();}};
 }
 
