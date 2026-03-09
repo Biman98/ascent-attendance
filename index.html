@@ -38,6 +38,7 @@ select{-webkit-appearance:auto;appearance:auto}
 </head>
 <body style="background:#0c1117!important">
 <div id="app"><div class="loading"><div class="spin"></div><p style="color:#7d8590;font-size:13px">Loading...</p></div></div>
+<div id="adminNav" style="display:none"></div>
 <div id="toast" class="toast"></div>
 
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
@@ -104,6 +105,7 @@ if(!mode)rMode();else if(mode==='staff')rStaff();else rAdmin();
 
 /* ===== HOME ===== */
 function rMode(){
+document.getElementById('adminNav').style.display='none';
 app.innerHTML='<div style="min-height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;padding:24px;background:#0c1117">'+
 '<div style="font-size:56px;margin-bottom:16px">🏢</div>'+
 '<h1 class="df" style="font-size:26px;margin-bottom:6px;color:#e6edf3">Ascent Digital Creation</h1>'+
@@ -134,6 +136,7 @@ document.getElementById('aPwd').addEventListener('keyup',function(e){if(e.key===
 
 /* ===== STAFF MODE ===== */
 function rStaff(){
+document.getElementById('adminNav').style.display='none';
 var today=fd();
 var h='<div style="padding:16px 20px;border-bottom:1px solid #30363d;display:flex;align-items:center;gap:12px"><button id="sBack" style="background:none;border:none;color:#7d8590;font-size:22px;cursor:pointer">←</button><div><div style="font-size:17px;font-weight:600;color:#e6edf3">👤 Staff Attendance</div>'+(selE?'<div style="color:#00d4aa;font-size:12px">'+selE.name+'</div>':'')+'</div></div>';
 
@@ -206,9 +209,36 @@ return {present:pr2,half:hf2,absent:ab2,effective:eff,base:base,overtime:ot,fine
 }
 
 /* ===== ADMIN MODE ===== */
+var navBound=false;
+function setupNav(){
+if(navBound)return;
+var navEl=document.getElementById('adminNav');
+navEl.innerHTML='<nav class="nav"><button data-pg="dash"><i>📊</i>Home</button><button data-pg="att"><i>📋</i>Attend.</button><button data-pg="staff"><i>👥</i>Staff</button><button data-pg="salary"><i>💰</i>Salary</button><button data-pg="set"><i>⚙️</i>Settings</button></nav>';
+navEl.addEventListener('click',function(ev){
+var btn=ev.target.closest('button[data-pg]');if(!btn)return;
+var target=btn.getAttribute('data-pg');
+if(target===pg)return;
+pg=target;eId=null;viewEmpId=null;
+if(target==='dash')loadRecsDate(fd(),render);
+else if(target==='salary')loadRecsMonth(salY,salM,render);
+else render();
+});
+navBound=true;
+}
+
+function updateNavHighlight(){
+var navEl=document.getElementById('adminNav');
+var btns=navEl.querySelectorAll('button[data-pg]');
+for(var i=0;i<btns.length;i++){
+btns[i].className=btns[i].getAttribute('data-pg')===pg?'on':'';
+}
+}
+
 function rAdmin(){
 var today=fd(),h='';
-var navH='<nav class="nav"><button id="n1" class="'+(pg==='dash'?'on':'')+'"><i>📊</i>Home</button><button id="n2" class="'+(pg==='att'?'on':'')+'"><i>📋</i>Attend.</button><button id="n3" class="'+(pg==='staff'?'on':'')+'"><i>👥</i>Staff</button><button id="n4" class="'+(pg==='salary'?'on':'')+'"><i>💰</i>Salary</button><button id="n5" class="'+(pg==='set'?'on':'')+'"><i>⚙️</i>Settings</button></nav>';
+setupNav();
+document.getElementById('adminNav').style.display='block';
+updateNavHighlight();
 
 /* DASHBOARD */
 if(pg==='dash'){
@@ -311,19 +341,14 @@ h+='<h2 class="df" style="font-size:20px;margin-bottom:16px;color:#e6edf3">⚙�
 '<div style="background:#10b98122;border-radius:10px;padding:12px;margin-top:12px"><p style="color:#10b981;font-size:12px;text-align:center;line-height:1.7">🟢 Firebase Cloud Active<br>Data Google server e safe ache</p></div>';
 }
 
-app.innerHTML='<div style="padding:20px 16px 100px">'+h+'</div>'+navH;
+app.innerHTML='<div style="padding:20px 16px 100px">'+h+'</div>';
 bindAdmin();
 }
 
 function bindAdmin(){
 var today=fd();
-document.getElementById('n1').onclick=function(){pg='dash';loadRecsDate(fd(),render);};
-document.getElementById('n2').onclick=function(){pg='att';viewEmpId=null;render();};
-document.getElementById('n3').onclick=function(){pg='staff';eId=null;setTimeout(render,50);};
-document.getElementById('n4').onclick=function(){pg='salary';loadRecsMonth(salY,salM,render);};
-document.getElementById('n5').onclick=function(){pg='set';render();};
 
-var bk=document.getElementById('bk');if(bk)bk.onclick=function(){mode=null;render();};
+var bk=document.getElementById('bk');if(bk)bk.onclick=function(){mode=null;document.getElementById('adminNav').style.display='none';render();};
 var ref=document.getElementById('refBtn');if(ref)ref.onclick=function(){showToast('🔄...');loadRecsDate(fd(),function(){showToast('✅ Updated!');render();});};
 
 // Attendance
