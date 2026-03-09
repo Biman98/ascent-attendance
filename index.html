@@ -34,6 +34,8 @@ select{-webkit-appearance:auto;appearance:auto}
 .spin{width:40px;height:40px;border:3px solid #30363d;border-top-color:#00d4aa;border-radius:50%;animation:sp .8s linear infinite}
 @keyframes sp{to{transform:rotate(360deg)}}
 @keyframes salPulse{0%,100%{box-shadow:0 0 8px #00d4aa22}50%{box-shadow:0 0 20px #00d4aa44,0 0 40px #00d4aa11}}
+@keyframes sparkle{0%,100%{opacity:.7;text-shadow:0 0 4px #fbbf2444}50%{opacity:1;text-shadow:0 0 12px #fbbf24,0 0 24px #fbbf2466,0 0 36px #fbbf2433}}
+@keyframes starFloat{0%{transform:translateY(0) scale(1)}50%{transform:translateY(-3px) scale(1.1)}100%{transform:translateY(0) scale(1)}}
 @media(prefers-color-scheme:light){html,body{background:#0c1117!important;color:#e6edf3!important}}
 </style>
 </head>
@@ -98,6 +100,9 @@ var mode=null,pg='dash',sStep='sel',selE=null,pin='',eId=null,attD=fd(),salM=new
 var viewEmpId=null; // for individual attendance view
 var app=document.getElementById('app');
 
+function sortedE(){var m=[],d=[];for(var i=0;i<E.length;i++){if(E[i].salaryType==='daily')d.push(E[i]);else m.push(E[i]);}return m.concat(d);}
+function catHeader(type){return '<div style="padding:8px 0;margin-top:8px;margin-bottom:4px;border-bottom:2px solid '+(type==='monthly'?'#00d4aa33':'#fbbf2433')+'"><span style="font-size:13px;font-weight:700;color:'+(type==='monthly'?'#00d4aa':'#fbbf24')+'">'+(type==='monthly'?'📅 Monthly Staff':'📆 Daily Staff')+'</span></div>';}
+
 function render(){
 try{
 if(!loaded){app.innerHTML='<div class="loading"><div class="spin"></div><p style="color:#7d8590;font-size:13px">Firebase loading...</p></div>';return;}
@@ -144,8 +149,11 @@ var h='<div style="padding:16px 20px;border-bottom:1px solid #30363d;display:fle
 if(sStep==='sel'){
 h+='<div style="padding:24px 20px"><h2 class="df" style="font-size:20px;margin-bottom:4px;color:#e6edf3">Apnar Naam Select Korun</h2><p style="color:#7d8590;font-size:13px;margin-bottom:20px">'+bn()+'</p>';
 if(!E.length)h+='<p style="color:#7d8590;text-align:center;margin-top:40px">Admin ke bolun employee add korte</p>';
-else for(var i=0;i<E.length;i++){var e=E[i],rec=R[e.id+'_'+today],st=rec?(rec.status==='present'?'✅':rec.status==='half'?'🕐':'❌'):'';
-h+='<button data-i="'+e.id+'" class="eS" style="width:100%;padding:16px;margin-bottom:10px;border-radius:14px;border:1px solid #30363d;background:#161b22;cursor:pointer;display:flex;align-items:center;gap:14px;text-align:left"><div style="width:44px;height:44px;border-radius:12px;background:#00d4aa22;display:flex;align-items:center;justify-content:center;color:#00d4aa;font-weight:700;font-size:18px">'+e.name[0].toUpperCase()+'</div><div style="flex:1"><div style="color:#e6edf3;font-size:15px;font-weight:600">'+e.name+'</div></div><span style="font-size:18px">'+st+'</span></button>';}
+else{var sE=sortedE(),lastType='';
+for(var i=0;i<sE.length;i++){var e=sE[i],rec=R[e.id+'_'+today],st=rec?(rec.status==='present'?'✅':rec.status==='half'?'🕐':'❌'):'';
+var curType=e.salaryType==='daily'?'daily':'monthly';
+if(curType!==lastType){h+=catHeader(curType);lastType=curType;}
+h+='<button data-i="'+e.id+'" class="eS" style="width:100%;padding:16px;margin-bottom:10px;border-radius:14px;border:1px solid #30363d;background:#161b22;cursor:pointer;display:flex;align-items:center;gap:14px;text-align:left"><div style="width:44px;height:44px;border-radius:12px;background:#00d4aa22;display:flex;align-items:center;justify-content:center;color:#00d4aa;font-weight:700;font-size:18px">'+e.name[0].toUpperCase()+'</div><div style="flex:1"><div style="color:#e6edf3;font-size:15px;font-weight:600">'+e.name+'</div></div><span style="font-size:18px">'+st+'</span></button>';}}
 h+='</div>';
 }else if(sStep==='pin'){
 h+='<div style="padding:24px 20px;text-align:center"><div style="width:72px;height:72px;border-radius:20px;background:#00d4aa22;margin:0 auto 16px;display:flex;align-items:center;justify-content:center;font-size:32px;color:#00d4aa">'+selE.name[0].toUpperCase()+'</div><h2 class="df" style="font-size:20px;margin-bottom:4px;color:#e6edf3">'+selE.name+'</h2><p style="color:#7d8590;font-size:13px;margin-bottom:28px">4-digit PIN deen</p><div style="display:flex;justify-content:center;gap:12px;margin-bottom:24px">';
@@ -173,18 +181,15 @@ recRef.add(absData).then(function(doc){absData._id=doc.id;R[selE.id+'_'+fd()]=ab
 }else{
 h+='<button id="mP" class="att-btn" style="background:#10b98122;border:1px solid #10b98144"><div style="font-size:36px">✅</div><div style="font-size:17px;font-weight:700;color:#10b981;margin-top:6px">Present</div></button>';
 h+='<button id="mH" class="att-btn" style="background:#fbbf2422;border:1px solid #fbbf2444"><div style="font-size:36px">🕐</div><div style="font-size:17px;font-weight:700;color:#fbbf24;margin-top:6px">Half Day</div></button>';}
-// SALARY TILL DATE - for staff view
+// SALARY TILL DATE - using calcSal for consistency
 var cm=new Date().getMonth(),cy=new Date().getFullYear();
-var sPr=0,sHf=0;
-for(var sd=1;sd<=new Date().getDate();sd++){
-if(new Date(cy,cm,sd).getDay()===0)continue;
-var sdt=cy+'-'+String(cm+1).padStart(2,'0')+'-'+String(sd).padStart(2,'0');
-var srec=R[selE.id+'_'+sdt];
-if(srec){if(srec.status==='present')sPr++;else if(srec.status==='half')sHf++;}
-}
-var sEff=sPr+sHf*0.5;
-var sSal=selE.salaryType==='monthly'?Math.round((selE.salary/30)*sEff):Math.round(selE.dailyRate*sEff);
-h+='<div style="margin-top:24px;padding:20px;border-radius:16px;background:linear-gradient(135deg,#00d4aa15,#00d4aa08);border:1px solid #00d4aa33;text-align:center;animation:salPulse 2s ease-in-out infinite"><div style="color:#7d8590;font-size:12px;margin-bottom:4px">💰 '+mn[cm]+' Salary (Till Date)</div><div style="color:#00d4aa;font-size:32px;font-weight:700;font-family:Playfair Display,serif">₹'+sSal.toLocaleString('en-IN')+'</div><div style="display:flex;justify-content:center;gap:16px;margin-top:8px"><div style="color:#10b981;font-size:12px">✅ '+sPr+' days</div><div style="color:#fbbf24;font-size:12px">🕐 '+sHf+' half</div><div style="color:#e6edf3;font-size:12px">⚡ '+sEff+' eff</div></div><div style="color:#7d8590;font-size:10px;margin-top:6px">'+(selE.salaryType==='monthly'?'₹'+selE.salary+'/mo ÷ 30 × '+sEff+' days':'₹'+selE.dailyRate+'/day × '+sEff+' days')+'</div></div>';
+var staffSal=calcSal(selE,cy,cm);
+var sSal=staffSal.net;
+var sEff=selE.salaryType==='monthly'?staffSal.effWithSun:staffSal.effective;
+h+='<div style="margin-top:24px;padding:20px;border-radius:16px;background:linear-gradient(135deg,#00d4aa15,#00d4aa08);border:1px solid #00d4aa33;text-align:center;animation:salPulse 2s ease-in-out infinite"><div style="color:#7d8590;font-size:12px;margin-bottom:4px">💰 '+mn[cm]+' Salary (Till Date)</div><div style="color:#00d4aa;font-size:32px;font-weight:700;font-family:Playfair Display,serif">₹'+sSal.toLocaleString('en-IN')+'</div><div style="display:flex;justify-content:center;gap:12px;margin-top:8px;flex-wrap:wrap"><div style="color:#10b981;font-size:12px">✅ '+staffSal.present+' days</div><div style="color:#fbbf24;font-size:12px">🕐 '+staffSal.half+' half</div>'+(selE.salaryType==='monthly'?'<div style="color:#60a5fa;font-size:12px">🔵 '+staffSal.paidSundays+' Sun</div>':'')+'<div style="color:#e6edf3;font-size:12px">⚡ '+sEff+' eff</div></div><div style="color:#7d8590;font-size:10px;margin-top:6px">'+(selE.salaryType==='monthly'?'₹'+selE.salary+'/mo ÷ 30 × '+sEff+' days':'₹'+selE.dailyRate+'/day × '+staffSal.effective+' days')+'</div></div>';
+// BONUS SPARKLE
+if(staffSal.overtime>0){
+h+='<div style="margin-top:14px;padding:14px 16px;border-radius:14px;background:linear-gradient(135deg,#fbbf2410,#fbbf2405);border:1px solid #fbbf2433;text-align:center;animation:sparkle 2s ease-in-out infinite"><div style="display:inline-block;animation:starFloat 1.5s ease-in-out infinite;font-size:22px">✨</div><div style="color:#fbbf24;font-size:14px;font-weight:700;margin-top:4px">Awesome! You received ₹'+staffSal.overtime.toLocaleString('en-IN')+' Bonus this month!</div><div style="color:#7d8590;font-size:10px;margin-top:4px">Keep up the great work! 🌟</div></div>';}
 h+='</div>';}
 
 app.innerHTML=h;
@@ -213,22 +218,31 @@ recRef.add(data).then(function(doc){data._id=doc.id;R[selE.id+'_'+fd()]=data;sho
 function calcSal(e,y,m){
 var totalDays=dim(y,m);
 var pr2=0,hf2=0,ab2=0,sun=csun(y,m),td=new Date();
+// Count Sundays till today for paid leave (monthly staff only)
+var paidSundays=0;
 for(var d=1;d<=totalDays;d++){
-if(new Date(y,m,d).getDay()===0)continue;
+var isToday=new Date(y,m,d)<=td;
+if(new Date(y,m,d).getDay()===0){
+// Monthly staff get Sunday as paid leave
+if(e.salaryType==='monthly'&&isToday)paidSundays++;
+continue;
+}
 var dt=y+'-'+String(m+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');
 var rec2=R[e.id+'_'+dt];
 if(rec2){if(rec2.status==='present')pr2++;else if(rec2.status==='half')hf2++;else ab2++;}
-else if(new Date(y,m,d)<=td)ab2++;
+else if(isToday)ab2++;
 }
 var adjKey=e.id+'_'+y+'_'+m;
 var adj=ADJ[adjKey]||{overtime:0,fine:0};
 var ot=parseFloat(adj.overtime)||0;
 var fine=parseFloat(adj.fine)||0;
-// FIXED: Monthly salary / 30 * effective days (not working days)
+// Monthly: effective = present + half*0.5 + paid sundays
+// Daily: effective = present + half*0.5 (no sunday pay)
 var eff=pr2+hf2*0.5;
-var base=e.salaryType==='monthly'?Math.round((e.salary/30)*eff):Math.round(e.dailyRate*eff);
+var effWithSun=eff+paidSundays;
+var base=e.salaryType==='monthly'?Math.round((e.salary/30)*effWithSun):Math.round(e.dailyRate*eff);
 var net=base+ot-fine;
-return {present:pr2,half:hf2,absent:ab2,effective:eff,base:base,overtime:ot,fine:fine,net:Math.max(0,net),sundays:sun,totalDays:totalDays};
+return {present:pr2,half:hf2,absent:ab2,effective:eff,effWithSun:effWithSun,paidSundays:paidSundays,base:base,overtime:ot,fine:fine,net:Math.max(0,net),sundays:sun,totalDays:totalDays};
 }
 
 /* ===== ADMIN MODE ===== */
@@ -271,8 +285,11 @@ h+='<div style="display:flex;justify-content:space-between;align-items:center;ma
 h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:20px"><div style="background:#00d4aa22;border-radius:14px;padding:16px;border:1px solid #00d4aa33"><div style="font-size:28px;font-weight:700;color:#00d4aa">'+E.length+'</div><div style="font-size:12px;color:#7d8590">Staff</div></div><div style="background:#10b98122;border-radius:14px;padding:16px;border:1px solid #10b98133"><div style="font-size:28px;font-weight:700;color:#10b981">'+pr+'</div><div style="font-size:12px;color:#7d8590">Present</div></div><div style="background:#fbbf2422;border-radius:14px;padding:16px;border:1px solid #fbbf2433"><div style="font-size:28px;font-weight:700;color:#fbbf24">'+hf+'</div><div style="font-size:12px;color:#7d8590">Half Day</div></div><div style="background:#ff6b6b22;border-radius:14px;padding:16px;border:1px solid #ff6b6b33"><div style="font-size:28px;font-weight:700;color:#ff6b6b">'+ab+'</div><div style="font-size:12px;color:#7d8590">Absent</div></div></div>';
 h+='<div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:12px"><h3 style="font-size:15px;color:#e6edf3">📋 Ajker Status</h3><button id="refBtn" style="background:none;border:none;color:#00d4aa;font-size:12px;cursor:pointer">🔄 Refresh</button></div>';
 if(!E.length)h+='<p style="color:#7d8590;font-size:13px">Staff tab e employee add korun</p>';
-else for(var i=0;i<E.length;i++){var e=E[i],rec=R[e.id+'_'+today],st2=rec?(rec.status==='present'?'✅':rec.status==='half'?'🕐':'❌'):'⏳';
-h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;'+(i<E.length-1?'border-bottom:1px solid #30363d':'')+'"><div><div style="font-size:14px;font-weight:500;color:#e6edf3">'+e.name+'</div><div style="color:#7d8590;font-size:11px">'+(rec?'In: '+(rec.punchIn||'-')+' | Out: '+(rec.punchOut||'-'):'Not marked')+'</div></div><span style="font-size:16px">'+st2+'</span></div>';}
+else{var sE=sortedE(),lastType='';
+for(var i=0;i<sE.length;i++){var e=sE[i],rec=R[e.id+'_'+today],st2=rec?(rec.status==='present'?'✅':rec.status==='half'?'🕐':'❌'):'⏳';
+var curType=e.salaryType==='daily'?'daily':'monthly';
+if(curType!==lastType){h+=catHeader(curType);lastType=curType;}
+h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #30363d22"><div><div style="font-size:14px;font-weight:500;color:#e6edf3">'+e.name+'</div><div style="color:#7d8590;font-size:11px">'+(rec?'In: '+(rec.punchIn||'-')+' | Out: '+(rec.punchOut||'-'):'Not marked')+'</div></div><span style="font-size:16px">'+st2+'</span></div>';}}
 h+='</div>';
 }
 
@@ -307,14 +324,17 @@ h+='<div class="card" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:
 h+='<h2 class="df" style="font-size:20px;margin-bottom:16px;color:#e6edf3">📋 Attendance Register</h2><input type="date" id="aD" value="'+attD+'">';
 h+='<div class="card">';
 if(!E.length)h+='<p style="color:#7d8590">Staff add korun</p>';
-else for(var i=0;i<E.length;i++){var e=E[i],k2=e.id+'_'+attD,rec=R[k2];
+else{var sE=sortedE(),lastType='';
+for(var i=0;i<sE.length;i++){var e=sE[i],k2=e.id+'_'+attD,rec=R[k2];
+var curType=e.salaryType==='daily'?'daily':'monthly';
+if(curType!==lastType){h+=catHeader(curType);lastType=curType;}
 h+='<div style="padding:12px 0;'+(i<E.length-1?'border-bottom:1px solid #30363d':'')+';display:flex;justify-content:space-between;align-items:center">';
 h+='<div style="flex:1"><div style="font-size:14px;font-weight:500;color:#e6edf3">'+e.name+'</div></div>';
 h+='<div style="display:flex;gap:6px;align-items:center">';
 var ts=['present','half','absent'];for(var t=0;t<ts.length;t++){var ty=ts[t],ac=rec&&rec.status===ty,col=ty==='present'?'#10b981':ty==='half'?'#fbbf24':'#ff6b6b',bg2=ac?(ty==='present'?'#10b98122':ty==='half'?'#fbbf2422':'#ff6b6b22'):'transparent',lb=ty==='present'?'✅P':ty==='half'?'🕐H':'❌A';
 h+='<button data-e="'+e.id+'" data-d="'+attD+'" data-t="'+ty+'" class="aM" style="padding:6px 10px;font-size:11px;border-radius:8px;cursor:pointer;border:'+(ac?'2px solid '+col:'1px solid #30363d')+';background:'+bg2+';color:'+col+'">'+lb+'</button>';}
 h+='<button data-e="'+e.id+'" class="viewEmpBtn" style="background:none;border:none;font-size:14px;cursor:pointer;margin-left:4px" title="View month">📅</button>';
-h+='</div></div>';}
+h+='</div></div>';}}
 h+='</div>';
 }
 }
@@ -324,8 +344,10 @@ else if(pg==='staff'){
 h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2 class="df" style="font-size:20px;color:#e6edf3">👥 Staff ('+E.length+')</h2><button id="addE" class="btn bp" style="width:auto;padding:8px 16px;font-size:13px">+ Add</button></div>';
 h+='<div id="eFA"></div>';
 if(!E.length)h+='<p style="color:#7d8590;text-align:center;margin-top:40px">+ Add button e staff add korun</p>';
-else{
-for(var i=0;i<E.length;i++){var e=E[i];
+else{var sE=sortedE(),lastType='';
+for(var i=0;i<sE.length;i++){var e=sE[i];
+var curType=e.salaryType==='daily'?'daily':'monthly';
+if(curType!==lastType){h+=catHeader(curType);lastType=curType;}
 h+='<div class="card" style="display:flex;justify-content:space-between;align-items:center"><div style="flex:1"><div style="font-size:15px;font-weight:600;color:#e6edf3">'+e.name+'</div><div style="color:#7d8590;font-size:12px;margin-top:2px">📱 '+(e.phone||'-')+'</div><div style="color:#7d8590;font-size:12px">'+(e.salaryType==='monthly'?'₹'+e.salary+'/month':'₹'+e.dailyRate+'/day')+' | PIN: '+(e.pin||'-')+'</div></div><div style="display:flex;gap:10px"><button data-e="'+e.id+'" class="edE" style="background:none;border:none;font-size:18px;cursor:pointer">✏️</button><button data-e="'+e.id+'" class="dlE" style="background:none;border:none;font-size:18px;cursor:pointer">🗑️</button></div></div>';
 }}
 }
@@ -338,10 +360,13 @@ for(var yr=2024;yr<=2027;yr++)yO+='<option value="'+yr+'"'+(yr===salY?' selected
 h+='<h2 class="df" style="font-size:20px;margin-bottom:16px;color:#e6edf3">💰 Salary Report</h2><div style="display:flex;gap:8px;margin-bottom:16px"><select id="sM">'+mO+'</select><select id="sY" style="flex:.6">'+yO+'</select></div>';
 h+='<div class="card" style="display:flex;justify-content:space-around"><div style="text-align:center"><div style="font-size:18px;font-weight:700;color:#e6edf3">'+dim(salY,salM)+'</div><div style="font-size:10px;color:#7d8590">Total Days</div></div><div style="text-align:center"><div style="font-size:18px;font-weight:700;color:#00d4aa">'+wd+'</div><div style="font-size:10px;color:#7d8590">Working</div></div><div style="text-align:center"><div style="font-size:18px;font-weight:700;color:#fbbf24">'+csun(salY,salM)+'</div><div style="font-size:10px;color:#7d8590">Sundays</div></div></div>';
 var total=0;
-for(var i=0;i<E.length;i++){var e=E[i];
+var sE=sortedE(),lastType='';
+for(var i=0;i<sE.length;i++){var e=sE[i];
+var curType=e.salaryType==='daily'?'daily':'monthly';
+if(curType!==lastType){h+=catHeader(curType);lastType=curType;}
 var sc=calcSal(e,salY,salM);total+=sc.net;
 h+='<div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:10px"><div><div style="font-size:15px;font-weight:600;color:#e6edf3">'+e.name+'</div><div style="color:#7d8590;font-size:11px">'+(e.salaryType==='monthly'?'Base: ₹'+e.salary+'/mo (÷30)':'Rate: ₹'+e.dailyRate+'/day')+'</div></div><div style="text-align:right"><div style="color:#00d4aa;font-size:20px;font-weight:700">₹'+sc.net.toLocaleString('en-IN')+'</div><div style="color:#7d8590;font-size:11px">Net Pay</div></div></div>';
-h+='<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px;background:#0c1117;border-radius:10px;padding:10px;margin-bottom:10px"><div style="text-align:center"><div style="font-size:14px;font-weight:700;color:#10b981">'+sc.present+'</div><div style="font-size:10px;color:#7d8590">Present</div></div><div style="text-align:center"><div style="font-size:14px;font-weight:700;color:#fbbf24">'+sc.half+'</div><div style="font-size:10px;color:#7d8590">Half</div></div><div style="text-align:center"><div style="font-size:14px;font-weight:700;color:#ff6b6b">'+sc.absent+'</div><div style="font-size:10px;color:#7d8590">Absent</div></div><div style="text-align:center"><div style="font-size:14px;font-weight:700;color:#e6edf3">'+sc.effective+'</div><div style="font-size:10px;color:#7d8590">Effective</div></div></div>';
+h+='<div style="display:grid;grid-template-columns:'+(e.salaryType==='monthly'?'1fr 1fr 1fr 1fr 1fr':'1fr 1fr 1fr 1fr')+';gap:6px;background:#0c1117;border-radius:10px;padding:10px;margin-bottom:10px"><div style="text-align:center"><div style="font-size:14px;font-weight:700;color:#10b981">'+sc.present+'</div><div style="font-size:10px;color:#7d8590">Present</div></div><div style="text-align:center"><div style="font-size:14px;font-weight:700;color:#fbbf24">'+sc.half+'</div><div style="font-size:10px;color:#7d8590">Half</div></div><div style="text-align:center"><div style="font-size:14px;font-weight:700;color:#ff6b6b">'+sc.absent+'</div><div style="font-size:10px;color:#7d8590">Absent</div></div>'+(e.salaryType==='monthly'?'<div style="text-align:center"><div style="font-size:14px;font-weight:700;color:#60a5fa">'+sc.paidSundays+'</div><div style="font-size:10px;color:#7d8590">Sun(Paid)</div></div>':'')+'<div style="text-align:center"><div style="font-size:14px;font-weight:700;color:#e6edf3">'+(e.salaryType==='monthly'?sc.effWithSun:sc.effective)+'</div><div style="font-size:10px;color:#7d8590">Effective</div></div></div>';
 // Overtime & Fine - always editable
 var adjKey2=e.id+'_'+salY+'_'+salM;var curAdj=ADJ[adjKey2]||{};
 var isPaid=curAdj.paid||false;
@@ -452,7 +477,8 @@ slip+='║ Sundays       : '+sc.sundays+'                     \n';
 slip+='║ Present       : '+sc.present+'                     \n';
 slip+='║ Half Day      : '+sc.half+'                      \n';
 slip+='║ Absent        : '+sc.absent+'                     \n';
-slip+='║ Effective Days: '+sc.effective+'                   \n';
+if(emp.salaryType==='monthly')slip+='║ Paid Sundays  : '+sc.paidSundays+'                     \n';
+slip+='║ Effective Days: '+(emp.salaryType==='monthly'?sc.effWithSun:sc.effective)+'                   \n';
 slip+='╠══════════════════════════════════════╣\n';
 slip+='║ '+(emp.salaryType==='monthly'?'Monthly Salary : ₹'+emp.salary+' (÷30)':'Daily Rate     : ₹'+emp.dailyRate)+'\n';
 slip+='║ Base Pay      : ₹'+sc.base.toLocaleString('en-IN')+'              \n';
