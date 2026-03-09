@@ -33,6 +33,7 @@ select{-webkit-appearance:auto;appearance:auto}
 .loading{display:flex;align-items:center;justify-content:center;min-height:60vh;flex-direction:column;gap:16px}
 .spin{width:40px;height:40px;border:3px solid #30363d;border-top-color:#00d4aa;border-radius:50%;animation:sp .8s linear infinite}
 @keyframes sp{to{transform:rotate(360deg)}}
+@keyframes salPulse{0%,100%{box-shadow:0 0 8px #00d4aa22}50%{box-shadow:0 0 20px #00d4aa44,0 0 40px #00d4aa11}}
 @media(prefers-color-scheme:light){html,body{background:#0c1117!important;color:#e6edf3!important}}
 </style>
 </head>
@@ -80,7 +81,7 @@ var mn=['January','February','March','April','May','June','July','August','Septe
 function loadAll(cb){
 var done=0;function chk(){done++;if(done>=3){loaded=true;if(cb)cb();}}
 empRef.orderBy('name').get().then(function(s){E=[];s.forEach(function(d){var o=d.data();o.id=d.id;E.push(o);});chk();}).catch(function(){chk();});
-setRef.get().then(function(d){if(d.exists){var o=d.data();S.lat=o.lat||S.lat;S.lng=o.lng||S.lng;S.radius=o.radius||S.radius;S.adminPwd=o.adminPwd||S.adminPwd;}chk();}).catch(function(){chk();});
+setRef.get().then(function(d){if(d.exists){var o=d.data();S.lat=o.lat||S.lat;S.lng=o.lng||S.lng;S.radius=o.radius||S.radius;S.adminPwd=o.adminPwd||S.adminPwd;if(o.cutoffHr!==undefined)S.cutoffHr=o.cutoffHr;if(o.cutoffMin!==undefined)S.cutoffMin=o.cutoffMin;}chk();}).catch(function(){chk();});
 recRef.where('date','==',fd()).get().then(function(s){s.forEach(function(d){var o=d.data();o._id=d.id;R[o.empId+'_'+o.date]=o;});chk();}).catch(function(){chk();});
 }
 
@@ -155,20 +156,42 @@ for(var n=0;n<nums.length;n++){if(nums[n]==='')h+='<div></div>';else h+='<button
 h+='</div><button id="vBtn" class="btn bp" style="margin-top:20px;opacity:'+(pin.length===4?1:.5)+'">Verify →</button></div>';
 }else if(sStep==='mark'){
 var key=selE.id+'_'+today,rec=R[key];
-h+='<div style="padding:24px 20px;text-align:center"><div style="font-size:14px;color:#7d8590;margin-bottom:6px">'+bn()+'</div><div class="df" style="font-size:36px;font-weight:700;margin-bottom:4px;color:#e6edf3">'+timeNow()+'</div><div style="color:#00d4aa;font-size:13px;margin-bottom:30px">📍 Geo-fence: '+S.radius+'m</div>';
+// Time cutoff check
+var cutoff=S.cutoffHr||11,cutoffMin=S.cutoffMin||10;
+var now=new Date(),isLate=now.getHours()>cutoff||(now.getHours()===cutoff&&now.getMinutes()>=cutoffMin);
+var cutoffStr=String(cutoff).padStart(2,'0')+':'+String(cutoffMin).padStart(2,'0');
+h+='<div style="padding:24px 20px;text-align:center"><div style="font-size:14px;color:#7d8590;margin-bottom:6px">'+bn()+'</div><div class="df" style="font-size:36px;font-weight:700;margin-bottom:4px;color:#e6edf3">'+timeNow()+'</div><div style="color:#00d4aa;font-size:13px;margin-bottom:6px">📍 Geo-fence: '+S.radius+'m</div><div style="color:#7d8590;font-size:11px;margin-bottom:24px">⏰ Attendance deadline: '+cutoffStr+'</div>';
 if(rec){var col=rec.status==='present'?'#10b981':rec.status==='half'?'#fbbf24':'#ff6b6b',bg=rec.status==='present'?'#10b98122':rec.status==='half'?'#fbbf2422':'#ff6b6b22';
 h+='<div style="padding:24px;border-radius:20px;margin-bottom:20px;background:'+bg+';border:1px solid '+col+'44"><div style="font-size:48px">'+(rec.status==='present'?'✅':rec.status==='half'?'🕐':'❌')+'</div><div style="font-size:18px;font-weight:700;margin-top:8px;color:'+col+'">'+(rec.status==='present'?'Present':rec.status==='half'?'Half Day':'Absent')+'</div><div style="color:#7d8590;font-size:13px;margin-top:4px">Ajker attendance deoa hoye geche</div><div style="color:#7d8590;font-size:12px;margin-top:6px">In: '+(rec.punchIn||'-')+(rec.punchOut?' | Out: '+rec.punchOut:'')+'</div></div>';
-if(!rec.punchOut)h+='<button id="poBtn" class="btn bs" style="border-color:#00d4aa55;color:#00d4aa">👋 Punch Out</button>';
+if(!rec.punchOut&&rec.status!=='absent')h+='<button id="poBtn" class="btn bs" style="border-color:#00d4aa55;color:#00d4aa">👋 Punch Out</button>';
+}else if(isLate){
+// TIME OVER - auto mark absent
+h+='<div style="padding:24px;border-radius:20px;margin-bottom:20px;background:#ff6b6b22;border:1px solid #ff6b6b44"><div style="font-size:48px">⛔</div><div style="font-size:18px;font-weight:700;margin-top:8px;color:#ff6b6b">Time Over!</div><div style="color:#7d8590;font-size:13px;margin-top:4px">'+cutoffStr+' er modhye attendance dite hoto</div><div style="color:#7d8590;font-size:12px;margin-top:6px">Admin ke bolun jodi special permission dorkar</div></div>';
+// Auto mark absent in Firebase
+var absData={empId:selE.id,empName:selE.name,date:fd(),status:'absent',punchIn:'Auto-Absent ('+cutoffStr+')',punchOut:'',ts:firebase.firestore.FieldValue.serverTimestamp()};
+recRef.add(absData).then(function(doc){absData._id=doc.id;R[selE.id+'_'+fd()]=absData;});
 }else{
 h+='<button id="mP" class="att-btn" style="background:#10b98122;border:1px solid #10b98144"><div style="font-size:36px">✅</div><div style="font-size:17px;font-weight:700;color:#10b981;margin-top:6px">Present</div></button>';
 h+='<button id="mH" class="att-btn" style="background:#fbbf2422;border:1px solid #fbbf2444"><div style="font-size:36px">🕐</div><div style="font-size:17px;font-weight:700;color:#fbbf24;margin-top:6px">Half Day</div></button>';}
+// SALARY TILL DATE - for staff view
+var cm=new Date().getMonth(),cy=new Date().getFullYear();
+var sPr=0,sHf=0;
+for(var sd=1;sd<=new Date().getDate();sd++){
+if(new Date(cy,cm,sd).getDay()===0)continue;
+var sdt=cy+'-'+String(cm+1).padStart(2,'0')+'-'+String(sd).padStart(2,'0');
+var srec=R[selE.id+'_'+sdt];
+if(srec){if(srec.status==='present')sPr++;else if(srec.status==='half')sHf++;}
+}
+var sEff=sPr+sHf*0.5;
+var sSal=selE.salaryType==='monthly'?Math.round((selE.salary/30)*sEff):Math.round(selE.dailyRate*sEff);
+h+='<div style="margin-top:24px;padding:20px;border-radius:16px;background:linear-gradient(135deg,#00d4aa15,#00d4aa08);border:1px solid #00d4aa33;text-align:center;animation:salPulse 2s ease-in-out infinite"><div style="color:#7d8590;font-size:12px;margin-bottom:4px">💰 '+mn[cm]+' Salary (Till Date)</div><div style="color:#00d4aa;font-size:32px;font-weight:700;font-family:Playfair Display,serif">₹'+sSal.toLocaleString('en-IN')+'</div><div style="display:flex;justify-content:center;gap:16px;margin-top:8px"><div style="color:#10b981;font-size:12px">✅ '+sPr+' days</div><div style="color:#fbbf24;font-size:12px">🕐 '+sHf+' half</div><div style="color:#e6edf3;font-size:12px">⚡ '+sEff+' eff</div></div><div style="color:#7d8590;font-size:10px;margin-top:6px">'+(selE.salaryType==='monthly'?'₹'+selE.salary+'/mo ÷ 30 × '+sEff+' days':'₹'+selE.dailyRate+'/day × '+sEff+' days')+'</div></div>';
 h+='</div>';}
 
 app.innerHTML=h;
 document.getElementById('sBack').onclick=function(){if(sStep==='sel'){mode=null;render();}else{sStep='sel';selE=null;pin='';render();}};
 var esBs=document.querySelectorAll('.eS');for(var b=0;b<esBs.length;b++)esBs[b].onclick=function(){var id=this.getAttribute('data-i');for(var j=0;j<E.length;j++)if(E[j].id===id){selE=E[j];break;}sStep='pin';pin='';render();};
 var nBs=document.querySelectorAll('.nB');for(var nb=0;nb<nBs.length;nb++)nBs[nb].onclick=function(){var v=this.getAttribute('data-v');if(v==='del')pin=pin.slice(0,-1);else if(pin.length<4)pin+=v;render();};
-var vB=document.getElementById('vBtn');if(vB)vB.onclick=function(){if(pin.length!==4)return showToast('4 digit PIN deen');if(!selE.pin||selE.pin!==pin){showToast('❌ Wrong PIN!');pin='';render();return;}sStep='mark';render();};
+var vB=document.getElementById('vBtn');if(vB)vB.onclick=function(){if(pin.length!==4)return showToast('4 digit PIN deen');if(!selE.pin||selE.pin!==pin){showToast('❌ Wrong PIN!');pin='';render();return;}sStep='mark';showToast('💰 Loading...');loadRecsMonth(new Date().getFullYear(),new Date().getMonth(),render);};
 var mP=document.getElementById('mP');if(mP)mP.onclick=function(){doGM('present');};
 var mH=document.getElementById('mH');if(mH)mH.onclick=function(){doGM('half');};
 var poB=document.getElementById('poBtn');if(poB)poB.onclick=function(){var k=selE.id+'_'+fd(),r=R[k];if(r&&r._id){var t=timeNow();recRef.doc(r._id).update({punchOut:t}).then(function(){r.punchOut=t;showToast('👋 Punch Out: '+t);render();});}};
@@ -210,28 +233,28 @@ return {present:pr2,half:hf2,absent:ab2,effective:eff,base:base,overtime:ot,fine
 
 /* ===== ADMIN MODE ===== */
 var navBound=false;
-function setupNav(){
-if(navBound)return;
-var navEl=document.getElementById('adminNav');
-navEl.innerHTML='<nav class="nav"><button data-pg="dash"><i>📊</i>Home</button><button data-pg="att"><i>📋</i>Attend.</button><button data-pg="staff"><i>👥</i>Staff</button><button data-pg="salary"><i>💰</i>Salary</button><button data-pg="set"><i>⚙️</i>Settings</button></nav>';
-navEl.addEventListener('click',function(ev){
-var btn=ev.target.closest('button[data-pg]');if(!btn)return;
-var target=btn.getAttribute('data-pg');
-if(target===pg)return;
+function navClick(target){
 pg=target;eId=null;viewEmpId=null;
+updateNavHighlight();
 if(target==='dash')loadRecsDate(fd(),render);
 else if(target==='salary')loadRecsMonth(salY,salM,render);
 else render();
-});
+}
+function setupNav(){
+if(navBound)return;
+var navEl=document.getElementById('adminNav');
+navEl.innerHTML='<nav class="nav"><button id="nb1" onclick=""><i>📊</i>Home</button><button id="nb2" onclick=""><i>📋</i>Attend.</button><button id="nb3" onclick=""><i>👥</i>Staff</button><button id="nb4" onclick=""><i>💰</i>Salary</button><button id="nb5" onclick=""><i>⚙️</i>Settings</button></nav>';
+document.getElementById('nb1').onclick=function(e){e.preventDefault();e.stopPropagation();navClick('dash');};
+document.getElementById('nb2').onclick=function(e){e.preventDefault();e.stopPropagation();navClick('att');};
+document.getElementById('nb3').onclick=function(e){e.preventDefault();e.stopPropagation();navClick('staff');};
+document.getElementById('nb4').onclick=function(e){e.preventDefault();e.stopPropagation();navClick('salary');};
+document.getElementById('nb5').onclick=function(e){e.preventDefault();e.stopPropagation();navClick('set');};
 navBound=true;
 }
 
 function updateNavHighlight(){
-var navEl=document.getElementById('adminNav');
-var btns=navEl.querySelectorAll('button[data-pg]');
-for(var i=0;i<btns.length;i++){
-btns[i].className=btns[i].getAttribute('data-pg')===pg?'on':'';
-}
+var map={dash:'nb1',att:'nb2',staff:'nb3',salary:'nb4',set:'nb5'};
+for(var k in map){var el=document.getElementById(map[k]);if(el)el.className=k===pg?'on':'';}
 }
 
 function rAdmin(){
@@ -335,6 +358,7 @@ if(E.length)h+='<div style="background:#00d4aa22;border-radius:14px;padding:16px
 else if(pg==='set'){
 h+='<h2 class="df" style="font-size:20px;margin-bottom:16px;color:#e6edf3">⚙️ Settings</h2>'+
 '<div class="card"><h3 style="color:#00d4aa;font-size:14px;margin-bottom:12px">📍 Office Geo-fence</h3><button id="scL" class="btn bp" style="margin-bottom:12px">📍 Current Location = Office</button><div style="display:flex;gap:8px"><div style="flex:1"><label style="color:#7d8590;font-size:11px">Lat</label><input id="sLa" type="number" step="any" value="'+S.lat+'"></div><div style="flex:1"><label style="color:#7d8590;font-size:11px">Lng</label><input id="sLo" type="number" step="any" value="'+S.lng+'"></div></div><label style="color:#7d8590;font-size:11px">Radius (meters)</label><input id="sR" type="number" value="'+S.radius+'"><button id="svS" class="btn bp">Save Location ✅</button></div>'+
+'<div class="card"><h3 style="color:#00d4aa;font-size:14px;margin-bottom:12px">⏰ Attendance Cutoff Time</h3><p style="color:#7d8590;font-size:12px;margin-bottom:10px">Ei time er pore staff nijera attendance dite parbe na — auto absent hoye jabe</p><div style="display:flex;gap:8px"><div style="flex:1"><label style="color:#7d8590;font-size:11px">Hour (0-23)</label><input id="cutH" type="number" min="0" max="23" value="'+(S.cutoffHr||11)+'"></div><div style="flex:1"><label style="color:#7d8590;font-size:11px">Minute (0-59)</label><input id="cutM" type="number" min="0" max="59" value="'+(S.cutoffMin||10)+'"></div></div><button id="svCut" class="btn bp">Save Cutoff ✅</button></div>'+
 '<div class="card"><h3 style="color:#00d4aa;font-size:14px;margin-bottom:12px">🔐 Admin Password</h3><input id="nPwd" type="password" placeholder="New password likhun"><button id="chPwd" class="btn bp">Password Change ✅</button></div>'+
 '<div class="card"><h3 style="color:#00d4aa;font-size:14px;margin-bottom:12px">📁 Backup</h3><button id="exB" class="btn bp">📤 Export JSON</button></div>'+
 '<div class="card" style="border-color:#ff6b6b33"><button id="clB" style="color:#ff6b6b;border:1px solid #ff6b6b;background:transparent;width:100%;padding:14px;border-radius:12px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit">🗑️ Clear All</button></div>'+
@@ -444,8 +468,9 @@ showToast('📄 Slip downloaded!');
 };
 
 // Settings
-var scL=document.getElementById('scL');if(scL)scL.onclick=function(){if(!navigator.geolocation)return showToast('GPS nai!');showToast('📍 Getting...');navigator.geolocation.getCurrentPosition(function(p){S.lat=p.coords.latitude;S.lng=p.coords.longitude;setRef.set({lat:S.lat,lng:S.lng,radius:S.radius,adminPwd:S.adminPwd},{merge:true}).then(function(){showToast('📍 Office set!');render();});},function(){showToast('Error!');},{enableHighAccuracy:true});};
-var svS=document.getElementById('svS');if(svS)svS.onclick=function(){S.lat=parseFloat(document.getElementById('sLa').value);S.lng=parseFloat(document.getElementById('sLo').value);S.radius=parseInt(document.getElementById('sR').value)||200;setRef.set({lat:S.lat,lng:S.lng,radius:S.radius,adminPwd:S.adminPwd},{merge:true}).then(function(){showToast('⚙️ Saved!');});};
+var scL=document.getElementById('scL');if(scL)scL.onclick=function(){if(!navigator.geolocation)return showToast('GPS nai!');showToast('📍 Getting...');navigator.geolocation.getCurrentPosition(function(p){S.lat=p.coords.latitude;S.lng=p.coords.longitude;setRef.set(S,{merge:true}).then(function(){showToast('📍 Office set!');render();});},function(){showToast('Error!');},{enableHighAccuracy:true});};
+var svS=document.getElementById('svS');if(svS)svS.onclick=function(){S.lat=parseFloat(document.getElementById('sLa').value);S.lng=parseFloat(document.getElementById('sLo').value);S.radius=parseInt(document.getElementById('sR').value)||200;setRef.set(S,{merge:true}).then(function(){showToast('⚙️ Saved!');});};
+var svCut=document.getElementById('svCut');if(svCut)svCut.onclick=function(){S.cutoffHr=parseInt(document.getElementById('cutH').value);S.cutoffMin=parseInt(document.getElementById('cutM').value);if(isNaN(S.cutoffHr)||S.cutoffHr<0||S.cutoffHr>23)S.cutoffHr=11;if(isNaN(S.cutoffMin)||S.cutoffMin<0||S.cutoffMin>59)S.cutoffMin=10;setRef.set(S,{merge:true}).then(function(){showToast('⏰ Cutoff saved: '+String(S.cutoffHr).padStart(2,'0')+':'+String(S.cutoffMin).padStart(2,'0'));});};
 var chP=document.getElementById('chPwd');if(chP)chP.onclick=function(){var np=document.getElementById('nPwd').value;if(!np||np.length<4)return showToast('Min 4 char!');S.adminPwd=np;setRef.set({adminPwd:np},{merge:true}).then(function(){showToast('🔐 Changed!');document.getElementById('nPwd').value='';});};
 var exB=document.getElementById('exB');if(exB)exB.onclick=function(){var d=JSON.stringify({employees:E,records:R,adjustments:ADJ,settings:S},null,2),b=new Blob([d],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='ascent_backup_'+fd()+'.json';a.click();showToast('📤 Exported!');};
 var clB=document.getElementById('clB');if(clB)clB.onclick=function(){if(confirm('SHOB data delete hobe!!')){empRef.get().then(function(s){s.forEach(function(d){d.ref.delete();});});recRef.get().then(function(s){s.forEach(function(d){d.ref.delete();});});adjRef.get().then(function(s){s.forEach(function(d){d.ref.delete();});});E=[];R={};ADJ={};showToast('🗑️ Cleared!');render();}};
