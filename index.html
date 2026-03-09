@@ -205,7 +205,7 @@ var d=geoD({lat:p.coords.latitude,lng:p.coords.longitude},{lat:S.lat,lng:S.lng})
 if(d>S.radius)return showToast('⛔ Office theke '+Math.round(d)+'m dure!');
 var data={empId:selE.id,empName:selE.name,date:fd(),status:st,punchIn:timeNow(),punchOut:'',lat:p.coords.latitude,lng:p.coords.longitude,ts:firebase.firestore.FieldValue.serverTimestamp()};
 showToast('💾 Saving...');
-recRef.add(data).then(function(doc){data._id=doc.id;R[selE.id+'_'+fd()]=data;showToast(st==='present'?'✅ Present!':'🕐 Half Day!');render();}).catch(function(){showToast('❌ Error!');});
+recRef.add(data).then(function(doc){data._id=doc.id;R[selE.id+'_'+fd()]=data;showToast(st==='present'?'✅ Present!':'🕐 Half Day!');loadRecsMonth(new Date().getFullYear(),new Date().getMonth(),render);}).catch(function(){showToast('❌ Error!');});
 },function(){showToast('📍 Location ON korun!');},{enableHighAccuracy:true,timeout:15000});
 }
 
