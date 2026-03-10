@@ -171,7 +171,6 @@ var cutoffStr=String(cutoff).padStart(2,'0')+':'+String(cutoffMin).padStart(2,'0
 h+='<div style="padding:24px 20px;text-align:center"><div style="font-size:14px;color:#7d8590;margin-bottom:6px">'+bn()+'</div><div class="df" style="font-size:36px;font-weight:700;margin-bottom:4px;color:#e6edf3">'+timeNow()+'</div><div style="color:#00d4aa;font-size:13px;margin-bottom:6px">📍 Geo-fence: '+S.radius+'m</div><div style="color:#7d8590;font-size:11px;margin-bottom:24px">⏰ Attendance deadline: '+cutoffStr+'</div>';
 if(rec){var col=rec.status==='present'?'#10b981':rec.status==='half'?'#fbbf24':'#ff6b6b',bg=rec.status==='present'?'#10b98122':rec.status==='half'?'#fbbf2422':'#ff6b6b22';
 h+='<div style="padding:24px;border-radius:20px;margin-bottom:20px;background:'+bg+';border:1px solid '+col+'44"><div style="font-size:48px">'+(rec.status==='present'?'✅':rec.status==='half'?'🕐':'❌')+'</div><div style="font-size:18px;font-weight:700;margin-top:8px;color:'+col+'">'+(rec.status==='present'?'Present':rec.status==='half'?'Half Day':'Absent')+'</div><div style="color:#7d8590;font-size:13px;margin-top:4px">Ajker attendance deoa hoye geche</div><div style="color:#7d8590;font-size:12px;margin-top:6px">In: '+(rec.punchIn||'-')+(rec.punchOut?' | Out: '+rec.punchOut:'')+'</div></div>';
-if(!rec.punchOut&&rec.status!=='absent')h+='<button id="poBtn" class="btn bs" style="border-color:#00d4aa55;color:#00d4aa">👋 Punch Out</button>';
 }else if(isLate){
 // TIME OVER - auto mark absent
 h+='<div style="padding:24px;border-radius:20px;margin-bottom:20px;background:#ff6b6b22;border:1px solid #ff6b6b44"><div style="font-size:48px">⛔</div><div style="font-size:18px;font-weight:700;margin-top:8px;color:#ff6b6b">Time Over!</div><div style="color:#7d8590;font-size:13px;margin-top:4px">'+cutoffStr+' er modhye attendance dite hoto</div><div style="color:#7d8590;font-size:12px;margin-top:6px">Admin ke bolun jodi special permission dorkar</div></div>';
@@ -188,8 +187,10 @@ var sSal=staffSal.net;
 var sEff=selE.salaryType==='monthly'?staffSal.effWithSun:staffSal.effective;
 h+='<div style="margin-top:24px;padding:20px;border-radius:16px;background:linear-gradient(135deg,#00d4aa15,#00d4aa08);border:1px solid #00d4aa33;text-align:center;animation:salPulse 2s ease-in-out infinite"><div style="color:#7d8590;font-size:12px;margin-bottom:4px">💰 '+mn[cm]+' Salary (Till Date)</div><div style="color:#00d4aa;font-size:32px;font-weight:700;font-family:Playfair Display,serif">₹'+sSal.toLocaleString('en-IN')+'</div><div style="display:flex;justify-content:center;gap:12px;margin-top:8px;flex-wrap:wrap"><div style="color:#10b981;font-size:12px">✅ '+staffSal.present+' days</div><div style="color:#fbbf24;font-size:12px">🕐 '+staffSal.half+' half</div>'+(selE.salaryType==='monthly'?'<div style="color:#60a5fa;font-size:12px">🔵 '+staffSal.paidSundays+' Sun</div>':'')+'<div style="color:#e6edf3;font-size:12px">⚡ '+sEff+' eff</div></div><div style="color:#7d8590;font-size:10px;margin-top:6px">'+(selE.salaryType==='monthly'?'₹'+selE.salary+'/mo ÷ 30 × '+sEff+' days':'₹'+selE.dailyRate+'/day × '+staffSal.effective+' days')+'</div></div>';
 // BONUS SPARKLE
-if(staffSal.overtime>0){
-h+='<div style="margin-top:14px;padding:14px 16px;border-radius:14px;background:linear-gradient(135deg,#fbbf2410,#fbbf2405);border:1px solid #fbbf2433;text-align:center;animation:sparkle 2s ease-in-out infinite"><div style="display:inline-block;animation:starFloat 1.5s ease-in-out infinite;font-size:22px">✨</div><div style="color:#fbbf24;font-size:14px;font-weight:700;margin-top:4px">Awesome! You received ₹'+staffSal.overtime.toLocaleString('en-IN')+' Bonus this month!</div><div style="color:#7d8590;font-size:10px;margin-top:4px">Keep up the great work! 🌟</div></div>';}
+if(staffSal.overtime>0&&!staffSal.otPaid){
+h+='<div style="margin-top:14px;padding:14px 16px;border-radius:14px;background:linear-gradient(135deg,#fbbf2410,#fbbf2405);border:1px solid #fbbf2433;text-align:center;animation:sparkle 2s ease-in-out infinite"><div style="display:inline-block;animation:starFloat 1.5s ease-in-out infinite;font-size:22px">✨</div><div style="color:#fbbf24;font-size:14px;font-weight:700;margin-top:4px">Awesome! You have ₹'+staffSal.overtime.toLocaleString('en-IN')+' Bonus this month!</div><div style="color:#7d8590;font-size:10px;margin-top:4px">Included in your salary 🌟</div></div>';}
+else if(staffSal.overtime>0&&staffSal.otPaid){
+h+='<div style="margin-top:14px;padding:14px 16px;border-radius:14px;background:linear-gradient(135deg,#10b98110,#10b98105);border:1px solid #10b98133;text-align:center"><div style="font-size:18px">💸</div><div style="color:#10b981;font-size:14px;font-weight:700;margin-top:4px">₹'+staffSal.overtime.toLocaleString('en-IN')+' Bonus already paid!</div><div style="color:#7d8590;font-size:10px;margin-top:4px">Separately paid — not in salary</div></div>';}
 h+='</div>';}
 
 app.innerHTML=h;
@@ -199,7 +200,6 @@ var nBs=document.querySelectorAll('.nB');for(var nb=0;nb<nBs.length;nb++)nBs[nb]
 var vB=document.getElementById('vBtn');if(vB)vB.onclick=function(){if(pin.length!==4)return showToast('4 digit PIN deen');if(!selE.pin||selE.pin!==pin){showToast('❌ Wrong PIN!');pin='';render();return;}sStep='mark';showToast('💰 Loading...');loadRecsMonth(new Date().getFullYear(),new Date().getMonth(),render);};
 var mP=document.getElementById('mP');if(mP)mP.onclick=function(){doGM('present');};
 var mH=document.getElementById('mH');if(mH)mH.onclick=function(){doGM('half');};
-var poB=document.getElementById('poBtn');if(poB)poB.onclick=function(){var k=selE.id+'_'+fd(),r=R[k];if(r&&r._id){var t=timeNow();recRef.doc(r._id).update({punchOut:t}).then(function(){r.punchOut=t;showToast('👋 Punch Out: '+t);render();});}};
 }
 
 function doGM(st){
@@ -236,13 +236,16 @@ var adjKey=e.id+'_'+y+'_'+m;
 var adj=ADJ[adjKey]||{overtime:0,fine:0};
 var ot=parseFloat(adj.overtime)||0;
 var fine=parseFloat(adj.fine)||0;
+var otPaid=adj.otPaid||false;
 // Monthly: effective = present + half*0.5 + paid sundays
 // Daily: effective = present + half*0.5 (no sunday pay)
 var eff=pr2+hf2*0.5;
 var effWithSun=eff+paidSundays;
 var base=e.salaryType==='monthly'?Math.round((e.salary/30)*effWithSun):Math.round(e.dailyRate*eff);
-var net=base+ot-fine;
-return {present:pr2,half:hf2,absent:ab2,effective:eff,effWithSun:effWithSun,paidSundays:paidSundays,base:base,overtime:ot,fine:fine,net:Math.max(0,net),sundays:sun,totalDays:totalDays};
+// If OT paid separately, don't add to net salary
+var netOt=otPaid?0:ot;
+var net=base+netOt-fine;
+return {present:pr2,half:hf2,absent:ab2,effective:eff,effWithSun:effWithSun,paidSundays:paidSundays,base:base,overtime:ot,otPaid:otPaid,fine:fine,net:Math.max(0,net),sundays:sun,totalDays:totalDays};
 }
 
 /* ===== ADMIN MODE ===== */
@@ -370,10 +373,16 @@ h+='<div style="display:grid;grid-template-columns:'+(e.salaryType==='monthly'?'
 // Overtime & Fine - always editable
 var adjKey2=e.id+'_'+salY+'_'+salM;var curAdj=ADJ[adjKey2]||{};
 var isPaid=curAdj.paid||false;
+var isOtPaid=curAdj.otPaid||false;
 h+='<div style="display:flex;gap:6px;margin-bottom:8px"><div style="flex:1;display:flex;align-items:center;gap:4px"><span style="color:#10b981;font-size:12px">OT ₹</span><input data-eid="'+e.id+'" class="otIn" type="number" placeholder="0" value="'+(sc.overtime||0)+'" style="margin:0;padding:8px;font-size:13px"></div><div style="flex:1;display:flex;align-items:center;gap:4px"><span style="color:#ff6b6b;font-size:12px">Fine ₹</span><input data-eid="'+e.id+'" class="fnIn" type="number" placeholder="0" value="'+(sc.fine||0)+'" style="margin:0;padding:8px;font-size:13px"></div></div>';
 h+='<div style="display:flex;gap:6px;margin-bottom:6px"><button data-eid="'+e.id+'" class="saveAdj btn bp" style="padding:8px;font-size:12px">💾 Save</button><button data-eid="'+e.id+'" class="clrAdj btn bs" style="padding:8px;font-size:12px;width:auto">🗑️ Clear</button><button data-eid="'+e.id+'" class="dlSlip btn bs" style="padding:8px;font-size:12px;width:auto;flex:1">📄 Slip</button></div>';
-// Paid status
-h+='<div style="display:flex;gap:6px"><button data-eid="'+e.id+'" class="markPaid btn '+(isPaid?'bs':'bp')+'" style="padding:8px;font-size:12px">'+(isPaid?'✅ Paid — Undo':'💰 Mark as Paid')+'</button></div>';
+// OT Paid separately
+if(sc.overtime>0){
+h+='<div style="display:flex;gap:6px;margin-bottom:6px"><button data-eid="'+e.id+'" class="payOt btn '+(isOtPaid?'bs':'bp')+'" style="padding:8px;font-size:12px;background:'+(isOtPaid?'transparent':'#fbbf24')+';color:'+(isOtPaid?'#fbbf24':'#0c1117')+';border:'+(isOtPaid?'1px solid #fbbf24':'none')+'">'+(isOtPaid?'✅ OT ₹'+sc.overtime+' Paid — Undo':'💸 Pay OT ₹'+sc.overtime+' Separately')+'</button></div>';
+if(isOtPaid)h+='<div style="text-align:center;color:#fbbf24;font-size:11px;margin-bottom:6px">OT ₹'+sc.overtime+' alag paid on '+(curAdj.otPaidDate||'')+' — salary theke deducted</div>';
+}
+// Salary Paid status
+h+='<div style="display:flex;gap:6px"><button data-eid="'+e.id+'" class="markPaid btn '+(isPaid?'bs':'bp')+'" style="padding:8px;font-size:12px">'+(isPaid?'✅ Salary Paid — Undo':'💰 Mark Salary Paid')+'</button></div>';
 if(isPaid)h+='<div style="text-align:center;margin-top:6px;color:#10b981;font-size:11px">✅ Salary paid on '+(curAdj.paidDate||'')+'</div>';
 h+='</div>';}
 if(E.length)h+='<div style="background:#00d4aa22;border-radius:14px;padding:16px;border:1px solid #00d4aa44;text-align:center"><div style="color:#7d8590;font-size:13px">Total Monthly Payout</div><div style="color:#00d4aa;font-size:28px;font-weight:700">₹'+total.toLocaleString('en-IN')+'</div></div>';
@@ -454,9 +463,21 @@ var eid=this.getAttribute('data-eid');
 var adjKey=eid+'_'+salY+'_'+salM;
 var existing=ADJ[adjKey]||{};
 var newPaid=!existing.paid;
-var data={empId:eid,year:String(salY),month:String(salM+1).padStart(2,'0'),overtime:existing.overtime||0,fine:existing.fine||0,paid:newPaid,paidDate:newPaid?fd():''};
-if(existing._id){adjRef.doc(existing._id).update({paid:newPaid,paidDate:data.paidDate}).then(function(){existing.paid=newPaid;existing.paidDate=data.paidDate;showToast(newPaid?'✅ Paid marked!':'↩️ Undone!');render();});}
-else{adjRef.add(data).then(function(doc){data._id=doc.id;ADJ[adjKey]=data;showToast('✅ Paid marked!');render();});}
+var data={empId:eid,year:String(salY),month:String(salM+1).padStart(2,'0'),overtime:existing.overtime||0,fine:existing.fine||0,paid:newPaid,paidDate:newPaid?fd():'',otPaid:existing.otPaid||false,otPaidDate:existing.otPaidDate||''};
+if(existing._id){adjRef.doc(existing._id).update({paid:newPaid,paidDate:data.paidDate}).then(function(){existing.paid=newPaid;existing.paidDate=data.paidDate;showToast(newPaid?'✅ Salary Paid!':'↩️ Undone!');render();});}
+else{adjRef.add(data).then(function(doc){data._id=doc.id;ADJ[adjKey]=data;showToast('✅ Salary Paid!');render();});}
+};
+
+// Pay OT Separately / Undo
+var otBtns=document.querySelectorAll('.payOt');for(var ob=0;ob<otBtns.length;ob++)otBtns[ob].onclick=function(){
+var eid=this.getAttribute('data-eid');
+var adjKey=eid+'_'+salY+'_'+salM;
+var existing=ADJ[adjKey]||{};
+var newOtPaid=!existing.otPaid;
+var upd={otPaid:newOtPaid,otPaidDate:newOtPaid?fd():''};
+if(existing._id){adjRef.doc(existing._id).update(upd).then(function(){existing.otPaid=newOtPaid;existing.otPaidDate=upd.otPaidDate;showToast(newOtPaid?'💸 OT ₹'+(existing.overtime||0)+' Paid!':'↩️ OT Undo!');render();});}
+else{var data={empId:eid,year:String(salY),month:String(salM+1).padStart(2,'0'),overtime:existing.overtime||0,fine:existing.fine||0,paid:false,paidDate:'',otPaid:newOtPaid,otPaidDate:upd.otPaidDate};
+adjRef.add(data).then(function(doc){data._id=doc.id;ADJ[adjKey]=data;showToast('💸 OT Paid!');render();});}
 };
 
 // Salary Slip Download
