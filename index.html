@@ -181,9 +181,11 @@ h+='<div class="loading"><div class="spin"></div><p style="color:#7d8590">Prepar
 }else{
 var showRec=rec&&!isAutoAbsent;
 h+='<div style="padding:24px 20px;text-align:center"><div style="font-size:14px;color:#7d8590;margin-bottom:6px">'+bn()+'</div><div class="df" style="font-size:36px;font-weight:700;margin-bottom:4px;color:#e6edf3">'+timeNow()+'</div><div style="color:#00d4aa;font-size:13px;margin-bottom:6px">📍 Geo-fence: '+S.radius+'m</div><div style="color:#7d8590;font-size:11px;margin-bottom:24px">⏰ Deadline: '+cutoffStr+(adminAllowed?' <span style=color:#10b981>✅ Admin Allowed</span>':'')+'</div>';
-if(showRec){var col=rec.status==='present'?'#10b981':rec.status==='half'?'#fbbf24':rec.status==='early'?'#f97316':'#ff6b6b',bg=rec.status==='present'?'#10b98122':rec.status==='half'?'#fbbf2422':rec.status==='early'?'#f9731622':'#ff6b6b22';
-h+='<div style="padding:24px;border-radius:20px;margin-bottom:20px;background:'+bg+';border:1px solid '+col+'44"><div style="font-size:48px">'+(rec.status==='present'?'✅':rec.status==='half'?'🕐':rec.status==='early'?'🚪':'❌')+'</div><div style="font-size:18px;font-weight:700;margin-top:8px;color:'+col+'">'+(rec.status==='present'?'Present':rec.status==='half'?'Half Day':rec.status==='early'?'Early Leave':'Absent')+'</div><div style="color:#7d8590;font-size:13px;margin-top:4px">Ajker attendance deoa hoye geche</div><div style="color:#7d8590;font-size:12px;margin-top:6px">In: '+(rec.punchIn||'-')+(rec.earlyTime?' | Early Leave: '+rec.earlyTime:'')+'</div></div>';
-if(rec.status==='present'&&!rec.earlyTime)h+='<button id="earlyBtn" class="btn" style="padding:12px;font-size:14px;background:#f9731622;border:1px solid #f9731644;color:#f97316;border-radius:12px;margin-bottom:12px">🚪 Early Leave</button>';
+if(showRec){var col=rec.status==='present'?'#10b981':rec.status==='half'?'#fbbf24':rec.status==='early'?'#f97316':'#ff6b6b',bg=rec.status==='present'?(rec.earlyTime?'#f9731622':'#10b98122'):rec.status==='half'?'#fbbf2422':rec.status==='early'?'#f9731622':'#ff6b6b22';
+if(rec.earlyTime){col='#f97316';bg='#f9731622';}
+h+='<div style="padding:24px;border-radius:20px;margin-bottom:20px;background:'+bg+';border:1px solid '+col+'44"><div style="font-size:48px">'+(rec.earlyHrs?'🚪':rec.status==='present'?'✅':rec.status==='half'?'🕐':'❌')+'</div><div style="font-size:18px;font-weight:700;margin-top:8px;color:'+col+'">'+(rec.earlyHrs?'Present + Early Leave ('+rec.earlyHrs+'hr)':rec.status==='present'?'Present':rec.status==='half'?'Half Day':'Absent')+'</div><div style="color:#7d8590;font-size:13px;margin-top:4px">Ajker attendance deoa hoye geche</div><div style="color:#7d8590;font-size:12px;margin-top:6px">In: '+(rec.punchIn||'-')+(rec.earlyHrs?' | EL: '+rec.earlyHrs+'hr @ '+rec.earlyTime:'')+'</div></div>';
+if(rec.status==='present'&&!rec.earlyHrs)h+='<div style="margin-top:12px"><div style="color:#f97316;font-size:13px;font-weight:600;margin-bottom:8px">🚪 Early Leave?</div><div style="display:flex;gap:8px;align-items:center"><input id="elH" type="number" min="0" max="8" placeholder="Hours" style="margin:0;padding:10px;font-size:14px;flex:1"><input id="elM" type="number" min="0" max="59" placeholder="Min" style="margin:0;padding:10px;font-size:14px;flex:1"><button id="earlyBtn" class="btn bp" style="width:auto;padding:10px 16px;font-size:13px">Submit</button></div><div style="color:#7d8590;font-size:10px;margin-top:4px">Koto ghonta agee chole jacchen? (jemon: 2 hr 30 min)</div></div>';
+if(rec.earlyHrs){var elDed=rec.earlyHrs;h+='<div style="margin-top:12px;padding:12px;border-radius:12px;background:#f9731615;border:1px solid #f9731633"><div style="color:#f97316;font-size:13px;font-weight:600">🚪 Early Leave: '+elDed+' hrs deducted</div><div style="color:#7d8590;font-size:11px;margin-top:2px">Worked '+(8-elDed)+' hrs out of 8 hrs</div></div>';}
 }else if(isLate){
 h+='<div style="padding:24px;border-radius:20px;margin-bottom:20px;background:#ff6b6b22;border:1px solid #ff6b6b44"><div style="font-size:48px">⛔</div><div style="font-size:18px;font-weight:700;margin-top:8px;color:#ff6b6b">Time Over!</div><div style="color:#7d8590;font-size:13px;margin-top:4px">'+cutoffStr+' er modhye attendance dite hoto</div><div style="color:#7d8590;font-size:12px;margin-top:6px">Admin ke bolun jodi special permission dorkar</div></div>';
 var absData={empId:selE.id,empName:selE.name,date:fd(),status:'absent',punchIn:'Auto-Absent ('+cutoffStr+')',punchOut:'',ts:firebase.firestore.FieldValue.serverTimestamp()};
@@ -225,11 +227,15 @@ adjRef.where('month','==',String(pM+1).padStart(2,'0')).where('year','==',String
 });});};
 var mP=document.getElementById('mP');if(mP)mP.onclick=function(){doGM('present');};
 var mH=document.getElementById('mH');if(mH)mH.onclick=function(){doGM('half');};
-// Early leave handler
+// Early leave handler - hours input
 var earlyBtn=document.getElementById('earlyBtn');if(earlyBtn)earlyBtn.onclick=function(){
+var elH=parseFloat(document.getElementById('elH').value)||0;
+var elM=parseFloat(document.getElementById('elM').value)||0;
+var totalHrs=Math.round((elH+elM/60)*100)/100;
+if(totalHrs<=0||totalHrs>8)return showToast('1-8 hr er modhye deen!');
 var key=selE.id+'_'+fd(),rec=R[key];
-if(rec&&rec._id){var t=timeNow();
-recRef.doc(rec._id).update({status:'early',earlyTime:t}).then(function(){rec.status='early';rec.earlyTime=t;showToast('🚪 Early Leave: '+t);loadRecsMonth(new Date().getFullYear(),new Date().getMonth(),render);});}
+if(rec&&rec._id){
+recRef.doc(rec._id).update({earlyHrs:totalHrs,earlyTime:timeNow()}).then(function(){rec.earlyHrs=totalHrs;rec.earlyTime=timeNow();showToast('🚪 Early Leave: '+totalHrs+' hrs');loadRecsMonth(new Date().getFullYear(),new Date().getMonth(),render);});}
 };
 }
 
@@ -266,14 +272,11 @@ continue;
 }
 var dt=y+'-'+String(m+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');
 var rec2=R[e.id+'_'+dt];
-if(rec2){if(rec2.status==='present')pr2++;else if(rec2.status==='half')hf2++;else if(rec2.status==='early'){
-// Early leave: calculate fraction based on leave time vs full day (10am-7:30pm = 9.5hrs)
-var earlyHrs=9.5;
-if(rec2.earlyTime){var parts=rec2.earlyTime.split(':');var leaveH=parseInt(parts[0])||0;var leaveM=parseInt(parts[1])||0;
-var startH=10;var workedHrs=((leaveH+(leaveM/60))-startH);earlyHrs=Math.max(0,Math.min(9.5,workedHrs));}
-var earlyFrac=Math.round((earlyHrs/9.5)*100)/100;
-pr2+=earlyFrac;
-}else ab2++;}
+if(rec2){if(rec2.status==='present'){
+// Check early leave hours
+if(rec2.earlyHrs){var worked=8-rec2.earlyHrs;pr2+=Math.max(0,Math.round((worked/8)*100)/100);}
+else pr2++;
+}else if(rec2.status==='half')hf2++;else if(rec2.status==='early'){hf2++;}else ab2++;}
 else if(isToday)ab2++;
 }
 var adjKey=e.id+'_'+y+'_'+m;
@@ -357,11 +360,11 @@ var dt=salY+'-'+String(salM+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');
 var rec=R[ve.id+'_'+dt];
 var isSun=new Date(salY,salM,d).getDay()===0;
 var dayN=dayNames[new Date(salY,salM,d).getDay()];
-var stIcon=isSun?'🔵':rec?(rec.status==='present'?'✅':rec.status==='half'?'🕐':rec.status==='early'?'🚪':'❌'):'⬜';
-var stText=isSun?'Sunday':rec?(rec.status==='present'?'Present':rec.status==='half'?'Half Day':rec.status==='early'?'Early Leave':'Absent'):'—';
-var stCol=isSun?'#60a5fa':rec?(rec.status==='present'?'#10b981':rec.status==='half'?'#fbbf24':rec.status==='early'?'#f97316':'#ff6b6b'):'#7d8590';
-var timeInfo=rec&&rec.punchIn?rec.punchIn+(rec.earlyTime?' → EL:'+rec.earlyTime:'')+(rec.punchOut?' → '+rec.punchOut:''):'';
-h+='<div style="display:flex;align-items:center;padding:8px 6px;'+(d<dim(salY,salM)?'border-bottom:1px solid #30363d22':'')+'"><div style="width:28px;font-size:13px;color:#7d8590;font-weight:600">'+d+'</div><div style="width:36px;font-size:11px;color:#7d8590">'+dayN+'</div><div style="flex:1;font-size:13px;color:'+stCol+'">'+stIcon+' '+stText+'</div><div style="font-size:11px;color:#7d8590">'+timeInfo+'</div></div>';
+var stIcon=isSun?'🔵':rec?(rec.status==='present'?(rec.earlyHrs?'🚪':'✅'):rec.status==='half'?'🕐':'❌'):'⬜';
+var stText=isSun?'Sunday':rec?(rec.status==='present'?(rec.earlyHrs?'EL '+rec.earlyHrs+'hr':'Present'):rec.status==='half'?'Half Day':'Absent'):'—';
+var stCol=isSun?'#60a5fa':rec?(rec.status==='present'?(rec.earlyHrs?'#f97316':'#10b981'):rec.status==='half'?'#fbbf24':'#ff6b6b'):'#7d8590';
+var timeInfo=rec&&rec.punchIn?rec.punchIn+(rec.earlyHrs?' | EL:'+rec.earlyHrs+'hr':''):'';
+h+='<div style="display:flex;align-items:center;padding:8px 6px;'+(d<dim(salY,salM)?'border-bottom:1px solid #30363d22':'')+'"><div style="width:28px;font-size:13px;color:#7d8590;font-weight:600">'+d+'</div><div style="width:36px;font-size:11px;color:#7d8590">'+dayN+'</div><div style="flex:1;font-size:13px;color:'+stCol+'">'+stIcon+' '+stText+'</div><div style="font-size:11px;color:#7d8590">'+timeInfo+'</div>'+(rec&&rec.status==='present'&&rec._id?'<input data-rid="'+rec._id+'" data-key="'+ve.id+'_'+dt+'" class="editEL" type="number" step="0.5" min="0" max="8" value="'+(rec.earlyHrs||0)+'" style="width:45px;margin:0;padding:4px;font-size:11px;text-align:center">':'')+'</div>';
 }
 h+='</div>';
 var sc=calcSal(ve,salY,salM);
@@ -482,6 +485,19 @@ render();
 };
 
 var attBack=document.getElementById('attBackBtn');if(attBack)attBack.onclick=function(){viewEmpId=null;render();};
+// Admin edit early leave hours
+var elInputs=document.querySelectorAll('.editEL');for(var ei=0;ei<elInputs.length;ei++)elInputs[ei].onchange=function(){
+var rid=this.getAttribute('data-rid'),rkey=this.getAttribute('data-key');
+var val=parseFloat(this.value)||0;
+if(val<0||val>8){showToast('0-8 hr!');return;}
+var upd=val>0?{earlyHrs:val,earlyTime:'Admin-set'}:{earlyHrs:0,earlyTime:''};
+// Use firebase.firestore.FieldValue.delete() for 0
+if(val===0)upd={earlyHrs:firebase.firestore.FieldValue.delete(),earlyTime:firebase.firestore.FieldValue.delete()};
+recRef.doc(rid).update(upd).then(function(){
+if(R[rkey]){if(val>0){R[rkey].earlyHrs=val;R[rkey].earlyTime='Admin-set';}else{delete R[rkey].earlyHrs;delete R[rkey].earlyTime;}}
+showToast(val>0?'🚪 EL set: '+val+'hr':'🚪 EL removed');render();
+});
+};
 var vMEl=document.getElementById('vM');if(vMEl)vMEl.onchange=function(){salM=parseInt(this.value);loadRecsMonth(salY,salM,render);};
 var vYEl=document.getElementById('vY');if(vYEl)vYEl.onchange=function(){salY=parseInt(this.value);loadRecsMonth(salY,salM,render);};
 
