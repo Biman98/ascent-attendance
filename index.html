@@ -168,9 +168,17 @@ var key=selE.id+'_'+today,rec=R[key];
 var cutoff=S.cutoffHr||11,cutoffMin=S.cutoffMin||10;
 var now=new Date(),isLate=now.getHours()>cutoff||(now.getHours()===cutoff&&now.getMinutes()>=cutoffMin);
 var cutoffStr=String(cutoff).padStart(2,'0')+':'+String(cutoffMin).padStart(2,'0');
+// Check if admin allowed late for this staff today
+var lateAllowed=false;
+if(isLate&&!rec){
+db.collection('lateAllow').doc(selE.id+'_'+fd()).get().then(function(doc){
+if(doc.exists&&doc.data().allowed){lateAllowed=true;isLate=false;sStep='mark';render();}
+});
+}
 h+='<div style="padding:24px 20px;text-align:center"><div style="font-size:14px;color:#7d8590;margin-bottom:6px">'+bn()+'</div><div class="df" style="font-size:36px;font-weight:700;margin-bottom:4px;color:#e6edf3">'+timeNow()+'</div><div style="color:#00d4aa;font-size:13px;margin-bottom:6px">📍 Geo-fence: '+S.radius+'m</div><div style="color:#7d8590;font-size:11px;margin-bottom:24px">⏰ Attendance deadline: '+cutoffStr+'</div>';
-if(rec){var col=rec.status==='present'?'#10b981':rec.status==='half'?'#fbbf24':'#ff6b6b',bg=rec.status==='present'?'#10b98122':rec.status==='half'?'#fbbf2422':'#ff6b6b22';
-h+='<div style="padding:24px;border-radius:20px;margin-bottom:20px;background:'+bg+';border:1px solid '+col+'44"><div style="font-size:48px">'+(rec.status==='present'?'✅':rec.status==='half'?'🕐':'❌')+'</div><div style="font-size:18px;font-weight:700;margin-top:8px;color:'+col+'">'+(rec.status==='present'?'Present':rec.status==='half'?'Half Day':'Absent')+'</div><div style="color:#7d8590;font-size:13px;margin-top:4px">Ajker attendance deoa hoye geche</div><div style="color:#7d8590;font-size:12px;margin-top:6px">In: '+(rec.punchIn||'-')+(rec.punchOut?' | Out: '+rec.punchOut:'')+'</div></div>';
+if(rec){var col=rec.status==='present'?'#10b981':rec.status==='half'?'#fbbf24':rec.status==='early'?'#f97316':'#ff6b6b',bg=rec.status==='present'?'#10b98122':rec.status==='half'?'#fbbf2422':rec.status==='early'?'#f9731622':'#ff6b6b22';
+h+='<div style="padding:24px;border-radius:20px;margin-bottom:20px;background:'+bg+';border:1px solid '+col+'44"><div style="font-size:48px">'+(rec.status==='present'?'✅':rec.status==='half'?'🕐':rec.status==='early'?'🚪':'❌')+'</div><div style="font-size:18px;font-weight:700;margin-top:8px;color:'+col+'">'+(rec.status==='present'?'Present':rec.status==='half'?'Half Day':rec.status==='early'?'Early Leave':'Absent')+'</div><div style="color:#7d8590;font-size:13px;margin-top:4px">Ajker attendance deoa hoye geche</div><div style="color:#7d8590;font-size:12px;margin-top:6px">In: '+(rec.punchIn||'-')+(rec.earlyTime?' | Early Leave: '+rec.earlyTime:'')+(rec.punchOut?' | Out: '+rec.punchOut:'')+'</div></div>';
+if(rec.status==='present'&&!rec.earlyTime)h+='<button id="earlyBtn" class="btn" style="padding:12px;font-size:14px;background:#f9731622;border:1px solid #f9731644;color:#f97316;border-radius:12px;margin-bottom:12px">🚪 Early Leave</button>';
 }else if(isLate){
 // TIME OVER - auto mark absent
 h+='<div style="padding:24px;border-radius:20px;margin-bottom:20px;background:#ff6b6b22;border:1px solid #ff6b6b44"><div style="font-size:48px">⛔</div><div style="font-size:18px;font-weight:700;margin-top:8px;color:#ff6b6b">Time Over!</div><div style="color:#7d8590;font-size:13px;margin-top:4px">'+cutoffStr+' er modhye attendance dite hoto</div><div style="color:#7d8590;font-size:12px;margin-top:6px">Admin ke bolun jodi special permission dorkar</div></div>';
@@ -191,15 +199,34 @@ if(staffSal.overtime>0&&!staffSal.otPaid){
 h+='<div style="margin-top:14px;padding:14px 16px;border-radius:14px;background:linear-gradient(135deg,#fbbf2410,#fbbf2405);border:1px solid #fbbf2433;text-align:center;animation:sparkle 2s ease-in-out infinite"><div style="display:inline-block;animation:starFloat 1.5s ease-in-out infinite;font-size:22px">✨</div><div style="color:#fbbf24;font-size:14px;font-weight:700;margin-top:4px">Awesome! You have ₹'+staffSal.overtime.toLocaleString('en-IN')+' Bonus this month!</div><div style="color:#7d8590;font-size:10px;margin-top:4px">Included in your salary 🌟</div></div>';}
 else if(staffSal.overtime>0&&staffSal.otPaid){
 h+='<div style="margin-top:14px;padding:14px 16px;border-radius:14px;background:linear-gradient(135deg,#10b98110,#10b98105);border:1px solid #10b98133;text-align:center"><div style="font-size:18px">💸</div><div style="color:#10b981;font-size:14px;font-weight:700;margin-top:4px">₹'+staffSal.overtime.toLocaleString('en-IN')+' Bonus already paid!</div><div style="color:#7d8590;font-size:10px;margin-top:4px">Separately paid — not in salary</div></div>';}
+// SALARY PAID STATUS - check recent months
+var paidMonths='';
+for(var pm=0;pm<3;pm++){var pMonth=(cm-pm+12)%12;var pYear=cm-pm<0?cy-1:cy;var pKey=selE.id+'_'+pYear+'_'+pMonth;var pAdj=ADJ[pKey]||{};
+if(pAdj.paid)paidMonths+='<div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 0"><div style="width:20px;height:20px;border-radius:50%;background:#10b981;display:flex;align-items:center;justify-content:center;font-size:12px">✓</div><span style="color:#10b981;font-size:13px;font-weight:600">'+mn[pMonth]+' '+pYear+' — Salary Paid ✅</span></div>';}
+if(paidMonths)h+='<div style="margin-top:14px;padding:14px 16px;border-radius:14px;background:#10b98108;border:1px solid #10b98122">'+paidMonths+'</div>';
 h+='</div>';}
 
 app.innerHTML=h;
 document.getElementById('sBack').onclick=function(){if(sStep==='sel'){mode=null;render();}else{sStep='sel';selE=null;pin='';render();}};
 var esBs=document.querySelectorAll('.eS');for(var b=0;b<esBs.length;b++)esBs[b].onclick=function(){var id=this.getAttribute('data-i');for(var j=0;j<E.length;j++)if(E[j].id===id){selE=E[j];break;}sStep='pin';pin='';render();};
 var nBs=document.querySelectorAll('.nB');for(var nb=0;nb<nBs.length;nb++)nBs[nb].onclick=function(){var v=this.getAttribute('data-v');if(v==='del')pin=pin.slice(0,-1);else if(pin.length<4)pin+=v;render();};
-var vB=document.getElementById('vBtn');if(vB)vB.onclick=function(){if(pin.length!==4)return showToast('4 digit PIN deen');if(!selE.pin||selE.pin!==pin){showToast('❌ Wrong PIN!');pin='';render();return;}sStep='mark';showToast('💰 Loading...');loadRecsMonth(new Date().getFullYear(),new Date().getMonth(),render);};
+var vB=document.getElementById('vBtn');if(vB)vB.onclick=function(){if(pin.length!==4)return showToast('4 digit PIN deen');if(!selE.pin||selE.pin!==pin){showToast('❌ Wrong PIN!');pin='';render();return;}sStep='mark';showToast('💰 Loading...');
+var cm2=new Date().getMonth(),cy2=new Date().getFullYear();
+loadRecsMonth(cy2,cm2,function(){
+// Also load past 2 months adjustments for paid status
+var done2=0;function chk2(){done2++;if(done2>=2)render();}
+for(var pp=1;pp<=2;pp++){(function(p){var pM=(cm2-p+12)%12;var pY=cm2-p<0?cy2-1:cy2;
+adjRef.where('month','==',String(pM+1).padStart(2,'0')).where('year','==',String(pY)).get().then(function(as){as.forEach(function(ad){var ao=ad.data();ao._id=ad.id;ADJ[ao.empId+'_'+pY+'_'+pM]=ao;});chk2();}).catch(function(){chk2();});
+})(pp);}
+});};
 var mP=document.getElementById('mP');if(mP)mP.onclick=function(){doGM('present');};
 var mH=document.getElementById('mH');if(mH)mH.onclick=function(){doGM('half');};
+// Early leave handler
+var earlyBtn=document.getElementById('earlyBtn');if(earlyBtn)earlyBtn.onclick=function(){
+var key=selE.id+'_'+fd(),rec=R[key];
+if(rec&&rec._id){var t=timeNow();
+recRef.doc(rec._id).update({status:'early',earlyTime:t}).then(function(){rec.status='early';rec.earlyTime=t;showToast('🚪 Early Leave: '+t);loadRecsMonth(new Date().getFullYear(),new Date().getMonth(),render);});}
+};
 }
 
 function doGM(st){
@@ -229,7 +256,14 @@ continue;
 }
 var dt=y+'-'+String(m+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');
 var rec2=R[e.id+'_'+dt];
-if(rec2){if(rec2.status==='present')pr2++;else if(rec2.status==='half')hf2++;else ab2++;}
+if(rec2){if(rec2.status==='present')pr2++;else if(rec2.status==='half')hf2++;else if(rec2.status==='early'){
+// Early leave: calculate fraction based on leave time vs full day (10am-7:30pm = 9.5hrs)
+var earlyHrs=9.5;
+if(rec2.earlyTime){var parts=rec2.earlyTime.split(':');var leaveH=parseInt(parts[0])||0;var leaveM=parseInt(parts[1])||0;
+var startH=10;var workedHrs=((leaveH+(leaveM/60))-startH);earlyHrs=Math.max(0,Math.min(9.5,workedHrs));}
+var earlyFrac=Math.round((earlyHrs/9.5)*100)/100;
+pr2+=earlyFrac;
+}else ab2++;}
 else if(isToday)ab2++;
 }
 var adjKey=e.id+'_'+y+'_'+m;
@@ -313,10 +347,10 @@ var dt=salY+'-'+String(salM+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');
 var rec=R[ve.id+'_'+dt];
 var isSun=new Date(salY,salM,d).getDay()===0;
 var dayN=dayNames[new Date(salY,salM,d).getDay()];
-var stIcon=isSun?'🔵':rec?(rec.status==='present'?'✅':rec.status==='half'?'🕐':'❌'):'⬜';
-var stText=isSun?'Sunday':rec?(rec.status==='present'?'Present':rec.status==='half'?'Half Day':'Absent'):'—';
-var stCol=isSun?'#60a5fa':rec?(rec.status==='present'?'#10b981':rec.status==='half'?'#fbbf24':'#ff6b6b'):'#7d8590';
-var timeInfo=rec&&rec.punchIn?rec.punchIn+(rec.punchOut?' → '+rec.punchOut:''):'';
+var stIcon=isSun?'🔵':rec?(rec.status==='present'?'✅':rec.status==='half'?'🕐':rec.status==='early'?'🚪':'❌'):'⬜';
+var stText=isSun?'Sunday':rec?(rec.status==='present'?'Present':rec.status==='half'?'Half Day':rec.status==='early'?'Early Leave':'Absent'):'—';
+var stCol=isSun?'#60a5fa':rec?(rec.status==='present'?'#10b981':rec.status==='half'?'#fbbf24':rec.status==='early'?'#f97316':'#ff6b6b'):'#7d8590';
+var timeInfo=rec&&rec.punchIn?rec.punchIn+(rec.earlyTime?' → EL:'+rec.earlyTime:'')+(rec.punchOut?' → '+rec.punchOut:''):'';
 h+='<div style="display:flex;align-items:center;padding:8px 6px;'+(d<dim(salY,salM)?'border-bottom:1px solid #30363d22':'')+'"><div style="width:28px;font-size:13px;color:#7d8590;font-weight:600">'+d+'</div><div style="width:36px;font-size:11px;color:#7d8590">'+dayN+'</div><div style="flex:1;font-size:13px;color:'+stCol+'">'+stIcon+' '+stText+'</div><div style="font-size:11px;color:#7d8590">'+timeInfo+'</div></div>';
 }
 h+='</div>';
@@ -333,10 +367,11 @@ var curType=e.salaryType==='daily'?'daily':'monthly';
 if(curType!==lastType){h+=catHeader(curType);lastType=curType;}
 h+='<div style="padding:12px 0;'+(i<E.length-1?'border-bottom:1px solid #30363d':'')+';display:flex;justify-content:space-between;align-items:center">';
 h+='<div style="flex:1"><div style="font-size:14px;font-weight:500;color:#e6edf3">'+e.name+'</div></div>';
-h+='<div style="display:flex;gap:6px;align-items:center">';
-var ts=['present','half','absent'];for(var t=0;t<ts.length;t++){var ty=ts[t],ac=rec&&rec.status===ty,col=ty==='present'?'#10b981':ty==='half'?'#fbbf24':'#ff6b6b',bg2=ac?(ty==='present'?'#10b98122':ty==='half'?'#fbbf2422':'#ff6b6b22'):'transparent',lb=ty==='present'?'✅P':ty==='half'?'🕐H':'❌A';
-h+='<button data-e="'+e.id+'" data-d="'+attD+'" data-t="'+ty+'" class="aM" style="padding:6px 10px;font-size:11px;border-radius:8px;cursor:pointer;border:'+(ac?'2px solid '+col:'1px solid #30363d')+';background:'+bg2+';color:'+col+'">'+lb+'</button>';}
-h+='<button data-e="'+e.id+'" class="viewEmpBtn" style="background:none;border:none;font-size:14px;cursor:pointer;margin-left:4px" title="View month">📅</button>';
+h+='<div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">';
+var ts=['present','half','absent','early'];for(var t=0;t<ts.length;t++){var ty=ts[t],ac=rec&&rec.status===ty,col=ty==='present'?'#10b981':ty==='half'?'#fbbf24':ty==='early'?'#f97316':'#ff6b6b',bg2=ac?(ty==='present'?'#10b98122':ty==='half'?'#fbbf2422':ty==='early'?'#f9731622':'#ff6b6b22'):'transparent',lb=ty==='present'?'✅P':ty==='half'?'🕐H':ty==='early'?'🚪E':'❌A';
+h+='<button data-e="'+e.id+'" data-d="'+attD+'" data-t="'+ty+'" class="aM" style="padding:5px 8px;font-size:10px;border-radius:8px;cursor:pointer;border:'+(ac?'2px solid '+col:'1px solid #30363d')+';background:'+bg2+';color:'+col+'">'+lb+'</button>';}
+h+='<button data-e="'+e.id+'" class="allowLate" style="padding:5px 8px;font-size:10px;border-radius:8px;cursor:pointer;border:1px solid #a78bfa;background:transparent;color:#a78bfa" title="Allow late attendance">⏰</button>';
+h+='<button data-e="'+e.id+'" class="viewEmpBtn" style="background:none;border:none;font-size:14px;cursor:pointer;margin-left:2px" title="View month">📅</button>';
 h+='</div></div>';}}
 h+='</div>';
 }
@@ -421,6 +456,14 @@ else{recRef.add(data).then(function(doc){data._id=doc.id;R[k]=data;showToast(ty+
 // View individual attendance
 var veBtns=document.querySelectorAll('.viewEmpBtn');for(var ve=0;ve<veBtns.length;ve++)veBtns[ve].onclick=function(){
 viewEmpId=this.getAttribute('data-e');loadRecsMonth(salY,salM,render);};
+
+// Allow Late attendance
+var alBtns=document.querySelectorAll('.allowLate');for(var al=0;al<alBtns.length;al++)alBtns[al].onclick=function(){
+var eid=this.getAttribute('data-e');var eName='';
+for(var j=0;j<E.length;j++)if(E[j].id===eid){eName=E[j].name;break;}
+db.collection('lateAllow').doc(eid+'_'+fd()).set({empId:eid,date:fd(),allowed:true}).then(function(){showToast('⏰ '+eName+' — late attendance allowed for today!');});
+};
+
 var attBack=document.getElementById('attBackBtn');if(attBack)attBack.onclick=function(){viewEmpId=null;render();};
 var vMEl=document.getElementById('vM');if(vMEl)vMEl.onchange=function(){salM=parseInt(this.value);loadRecsMonth(salY,salM,render);};
 var vYEl=document.getElementById('vY');if(vYEl)vYEl.onchange=function(){salY=parseInt(this.value);loadRecsMonth(salY,salM,render);};
