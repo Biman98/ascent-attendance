@@ -191,6 +191,7 @@ if(!isAutoAbsent&&!rec)recRef.add(absData).then(function(doc){absData._id=doc.id
 }else{
 h+='<button id="mP" class="att-btn" style="background:#10b98122;border:1px solid #10b98144"><div style="font-size:36px">✅</div><div style="font-size:17px;font-weight:700;color:#10b981;margin-top:6px">Present</div></button>';
 h+='<button id="mH" class="att-btn" style="background:#fbbf2422;border:1px solid #fbbf2444"><div style="font-size:36px">🕐</div><div style="font-size:17px;font-weight:700;color:#fbbf24;margin-top:6px">Half Day</div></button>';}
+}
 // SALARY TILL DATE - using calcSal for consistency
 var cm=new Date().getMonth(),cy=new Date().getFullYear();
 var staffSal=calcSal(selE,cy,cm);
