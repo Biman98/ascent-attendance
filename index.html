@@ -194,13 +194,9 @@ if(!isAutoAbsent&&!rec)recRef.add(absData).then(function(doc){absData._id=doc.id
 h+='<button id="mP" class="att-btn" style="background:#10b98122;border:1px solid #10b98144"><div style="font-size:36px">✅</div><div style="font-size:17px;font-weight:700;color:#10b981;margin-top:6px">Present</div></button>';
 h+='<button id="mH" class="att-btn" style="background:#fbbf2422;border:1px solid #fbbf2444"><div style="font-size:36px">🕐</div><div style="font-size:17px;font-weight:700;color:#fbbf24;margin-top:6px">Half Day</div></button>';}
 }
-// SALARY TILL DATE - using calcSal for consistency
+// BONUS & PAID STATUS (salary display removed)
 var cm=new Date().getMonth(),cy=new Date().getFullYear();
 var staffSal=calcSal(selE,cy,cm);
-var sSal=staffSal.net;
-var sEff=selE.salaryType==='monthly'?staffSal.effWithSun:staffSal.effective;
-h+='<div style="margin-top:24px;padding:20px;border-radius:16px;background:linear-gradient(135deg,#00d4aa15,#00d4aa08);border:1px solid #00d4aa33;text-align:center;animation:salPulse 2s ease-in-out infinite"><div style="color:#7d8590;font-size:12px;margin-bottom:4px">💰 '+mn[cm]+' Salary (Till Date)</div><div style="color:#00d4aa;font-size:32px;font-weight:700;font-family:Playfair Display,serif">₹'+sSal.toLocaleString('en-IN')+'</div><div style="display:flex;justify-content:center;gap:12px;margin-top:8px;flex-wrap:wrap"><div style="color:#10b981;font-size:12px">✅ '+staffSal.present+' days</div><div style="color:#fbbf24;font-size:12px">🕐 '+staffSal.half+' half</div>'+(selE.salaryType==='monthly'?'<div style="color:#60a5fa;font-size:12px">🔵 '+staffSal.paidSundays+' Sun</div>':'')+'<div style="color:#e6edf3;font-size:12px">⚡ '+sEff+' eff</div></div><div style="color:#7d8590;font-size:10px;margin-top:6px">'+(selE.salaryType==='monthly'?'₹'+selE.salary+'/mo ÷ 30 × '+sEff+' days':'₹'+selE.dailyRate+'/day × '+staffSal.effective+' days')+'</div></div>';
-// BONUS SPARKLE
 if(staffSal.overtime>0&&!staffSal.otPaid){
 h+='<div style="margin-top:14px;padding:14px 16px;border-radius:14px;background:linear-gradient(135deg,#fbbf2410,#fbbf2405);border:1px solid #fbbf2433;text-align:center;animation:sparkle 2s ease-in-out infinite"><div style="display:inline-block;animation:starFloat 1.5s ease-in-out infinite;font-size:22px">✨</div><div style="color:#fbbf24;font-size:14px;font-weight:700;margin-top:4px">Awesome! You have ₹'+staffSal.overtime.toLocaleString('en-IN')+' Bonus this month!</div><div style="color:#7d8590;font-size:10px;margin-top:4px">Included in your salary 🌟</div></div>';}
 else if(staffSal.overtime>0&&staffSal.otPaid){
@@ -361,10 +357,19 @@ var rec=R[ve.id+'_'+dt];
 var isSun=new Date(salY,salM,d).getDay()===0;
 var dayN=dayNames[new Date(salY,salM,d).getDay()];
 var stIcon=isSun?'🔵':rec?(rec.status==='present'?(rec.earlyHrs?'🚪':'✅'):rec.status==='half'?'🕐':'❌'):'⬜';
-var stText=isSun?'Sunday':rec?(rec.status==='present'?(rec.earlyHrs?'EL '+rec.earlyHrs+'hr':'Present'):rec.status==='half'?'Half Day':'Absent'):'—';
+var stText=isSun?'Sun':rec?(rec.status==='present'?(rec.earlyHrs?'EL'+rec.earlyHrs+'h':'P'):rec.status==='half'?'H':'A'):'—';
 var stCol=isSun?'#60a5fa':rec?(rec.status==='present'?(rec.earlyHrs?'#f97316':'#10b981'):rec.status==='half'?'#fbbf24':'#ff6b6b'):'#7d8590';
-var timeInfo=rec&&rec.punchIn?rec.punchIn+(rec.earlyHrs?' | EL:'+rec.earlyHrs+'hr':''):'';
-h+='<div style="display:flex;align-items:center;padding:8px 6px;'+(d<dim(salY,salM)?'border-bottom:1px solid #30363d22':'')+'"><div style="width:28px;font-size:13px;color:#7d8590;font-weight:600">'+d+'</div><div style="width:36px;font-size:11px;color:#7d8590">'+dayN+'</div><div style="flex:1;font-size:13px;color:'+stCol+'">'+stIcon+' '+stText+'</div><div style="font-size:11px;color:#7d8590">'+timeInfo+'</div>'+(rec&&rec.status==='present'&&rec._id?'<input data-rid="'+rec._id+'" data-key="'+ve.id+'_'+dt+'" class="editEL" type="number" step="0.5" min="0" max="8" value="'+(rec.earlyHrs||0)+'" style="width:45px;margin:0;padding:4px;font-size:11px;text-align:center">':'')+'</div>';
+h+='<div style="display:flex;align-items:center;padding:6px 4px;'+(d<dim(salY,salM)?'border-bottom:1px solid #30363d22':'')+'"><div style="width:22px;font-size:12px;color:#7d8590;font-weight:600">'+d+'</div><div style="width:30px;font-size:10px;color:#7d8590">'+dayN+'</div><div style="width:42px;font-size:11px;color:'+stCol+'">'+stIcon+stText+'</div>';
+if(!isSun){
+var mts=['present','half','absent'];
+h+='<div style="display:flex;gap:3px">';
+for(var mt=0;mt<mts.length;mt++){var mty=mts[mt],mac=rec&&rec.status===mty,mcol=mty==='present'?'#10b981':mty==='half'?'#fbbf24':'#ff6b6b',mbg=mac?(mty==='present'?'#10b98122':mty==='half'?'#fbbf2422':'#ff6b6b22'):'transparent',mlb=mty==='present'?'P':mty==='half'?'H':'A';
+h+='<button data-e="'+ve.id+'" data-d="'+dt+'" data-t="'+mty+'" class="aM" style="padding:3px 7px;font-size:9px;border-radius:6px;cursor:pointer;border:'+(mac?'2px solid '+mcol:'1px solid #30363d')+';background:'+mbg+';color:'+mcol+'">'+mlb+'</button>';}
+h+='</div>';
+// EL input
+if(rec&&rec.status==='present'&&rec._id)h+='<input data-rid="'+rec._id+'" data-key="'+ve.id+'_'+dt+'" class="editEL" type="number" step="0.5" min="0" max="8" value="'+(rec.earlyHrs||0)+'" style="width:40px;margin:0 0 0 3px;padding:3px;font-size:10px;text-align:center" title="Early Leave hrs">';
+}
+h+='</div>';
 }
 h+='</div>';
 var sc=calcSal(ve,salY,salM);
@@ -381,7 +386,7 @@ if(curType!==lastType){h+=catHeader(curType);lastType=curType;}
 h+='<div style="padding:12px 0;'+(i<E.length-1?'border-bottom:1px solid #30363d':'')+';display:flex;justify-content:space-between;align-items:center">';
 h+='<div style="flex:1"><div style="font-size:14px;font-weight:500;color:#e6edf3">'+e.name+'</div></div>';
 h+='<div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">';
-var ts=['present','half','absent','early'];for(var t=0;t<ts.length;t++){var ty=ts[t],ac=rec&&rec.status===ty,col=ty==='present'?'#10b981':ty==='half'?'#fbbf24':ty==='early'?'#f97316':'#ff6b6b',bg2=ac?(ty==='present'?'#10b98122':ty==='half'?'#fbbf2422':ty==='early'?'#f9731622':'#ff6b6b22'):'transparent',lb=ty==='present'?'✅P':ty==='half'?'🕐H':ty==='early'?'🚪E':'❌A';
+var ts=['present','half','absent'];for(var t=0;t<ts.length;t++){var ty=ts[t],ac=rec&&rec.status===ty,col=ty==='present'?'#10b981':ty==='half'?'#fbbf24':'#ff6b6b',bg2=ac?(ty==='present'?'#10b98122':ty==='half'?'#fbbf2422':'#ff6b6b22'):'transparent',lb=ty==='present'?'✅P':ty==='half'?'🕐H':'❌A';
 h+='<button data-e="'+e.id+'" data-d="'+attD+'" data-t="'+ty+'" class="aM" style="padding:5px 8px;font-size:10px;border-radius:8px;cursor:pointer;border:'+(ac?'2px solid '+col:'1px solid #30363d')+';background:'+bg2+';color:'+col+'">'+lb+'</button>';}
 var isAllowed=LATE[e.id]||false;
 h+='<button data-e="'+e.id+'" class="allowLate" style="padding:5px 8px;font-size:10px;border-radius:8px;cursor:pointer;border:1px solid '+(isAllowed?'#10b981':'#a78bfa')+';background:'+(isAllowed?'#10b98122':'transparent')+';color:'+(isAllowed?'#10b981':'#a78bfa')+'" title="'+(isAllowed?'Allowed - click to withdraw':'Allow late attendance')+'">'+(isAllowed?'✅⏰':'⏰')+'</button>';
@@ -400,7 +405,7 @@ else{var sE=sortedE(),lastType='';
 for(var i=0;i<sE.length;i++){var e=sE[i];
 var curType=e.salaryType==='daily'?'daily':'monthly';
 if(curType!==lastType){h+=catHeader(curType);lastType=curType;}
-h+='<div class="card" style="display:flex;justify-content:space-between;align-items:center"><div style="flex:1"><div style="font-size:15px;font-weight:600;color:#e6edf3">'+e.name+'</div><div style="color:#7d8590;font-size:12px;margin-top:2px">📱 '+(e.phone||'-')+'</div><div style="color:#7d8590;font-size:12px">'+(e.salaryType==='monthly'?'₹'+e.salary+'/month':'₹'+e.dailyRate+'/day')+' | PIN: '+(e.pin||'-')+'</div></div><div style="display:flex;gap:10px"><button data-e="'+e.id+'" class="edE" style="background:none;border:none;font-size:18px;cursor:pointer">✏️</button><button data-e="'+e.id+'" class="dlE" style="background:none;border:none;font-size:18px;cursor:pointer">🗑️</button></div></div>';
+h+='<div class="card" style="display:flex;justify-content:space-between;align-items:center"><div style="flex:1"><div style="font-size:15px;font-weight:600;color:#e6edf3">'+e.name+'</div><div style="color:#7d8590;font-size:12px;margin-top:2px">📱 '+(e.phone||'-')+'</div><div style="color:#7d8590;font-size:12px">'+(e.salaryType==='monthly'?'₹'+e.salary+'/month':'₹'+e.dailyRate+'/day')+' | PIN: '+(e.pin||'-')+'</div></div><div style="display:flex;gap:10px"><button data-e="'+e.id+'" class="viewEmpBtn" style="background:none;border:none;font-size:18px;cursor:pointer" title="View month attendance">📅</button><button data-e="'+e.id+'" class="edE" style="background:none;border:none;font-size:18px;cursor:pointer">✏️</button><button data-e="'+e.id+'" class="dlE" style="background:none;border:none;font-size:18px;cursor:pointer">🗑️</button></div></div>';
 }}
 }
 
