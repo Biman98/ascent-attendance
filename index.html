@@ -67,8 +67,9 @@ var empRef=db.collection('employees');
 var recRef=db.collection('attendance');
 var setRef=db.collection('settings').doc('main');
 var adjRef=db.collection('adjustments');
+var salHistRef=db.collection('salaryHistory');
 
-var E=[],R={},S={lat:22.5726,lng:88.3639,radius:200,adminPwd:'ascent2026'},ADJ={},LATE={};
+var E=[],R={},S={lat:22.5726,lng:88.3639,radius:200,adminPwd:'ascent2026'},ADJ={},LATE={},SALHIST={};
 var loaded=false;
 
 function fd(d){d=d||new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
@@ -146,10 +147,12 @@ document.getElementById('aPwd').addEventListener('keyup',function(e){if(e.key===
 }
 
 /* ===== STAFF MODE ===== */
+var staffTab='att'; // 'att' or 'salary'
+var salaryPwdSet=false,salaryPwdInput='';
 function rStaff(){
 document.getElementById('adminNav').style.display='none';
 var today=fd();
-var h='<div style="padding:16px 20px;border-bottom:1px solid #30363d;display:flex;align-items:center;gap:12px"><button id="sBack" style="background:none;border:none;color:#7d8590;font-size:22px;cursor:pointer">←</button><div><div style="font-size:17px;font-weight:600;color:#e6edf3">👤 Staff Attendance</div>'+(selE?'<div style="color:#00d4aa;font-size:12px">'+selE.name+'</div>':'')+'</div></div>';
+var h='<div style="padding:16px 20px;border-bottom:1px solid #30363d;display:flex;align-items:center;gap:12px"><button id="sBack" style="background:none;border:none;color:#7d8590;font-size:22px;cursor:pointer">←</button><div><div style="font-size:17px;font-weight:600;color:#e6edf3">👤 '+(selE?selE.name:'Staff')+'</div></div></div>';
 
 if(sStep==='sel'){
 h+='<div style="padding:24px 20px"><h2 class="df" style="font-size:20px;margin-bottom:4px;color:#e6edf3">Apnar Naam Select Korun</h2><p style="color:#7d8590;font-size:13px;margin-bottom:20px">'+bn()+'</p>';
@@ -167,7 +170,36 @@ h+='</div><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;ma
 var nums=[1,2,3,4,5,6,7,8,9,'',0,'del'];
 for(var n=0;n<nums.length;n++){if(nums[n]==='')h+='<div></div>';else h+='<button class="nB" data-v="'+nums[n]+'" style="padding:16px;font-size:22px;font-weight:600;border-radius:14px;border:1px solid #30363d;background:#161b22;color:#e6edf3;cursor:pointer">'+(nums[n]==='del'?'⌫':nums[n])+'</button>';}
 h+='</div><button id="vBtn" class="btn bp" style="margin-top:20px;opacity:'+(pin.length===4?1:.5)+'">Verify →</button></div>';
-}else if(sStep==='mark'){
+}else if(sStep==='mark'||sStep==='salary'){
+// Tab navigation
+h+='<div style="display:flex;gap:8px;padding:12px 20px"><button id="staffAttTab" style="flex:1;padding:10px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:600;border:1px solid '+(staffTab==='att'?'#00d4aa':'#30363d')+';background:'+(staffTab==='att'?'#00d4aa22':'transparent')+';color:'+(staffTab==='att'?'#00d4aa':'#7d8590')+';font-family:inherit">📋 Attendance</button><button id="staffSalTab" style="flex:1;padding:10px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:600;border:1px solid '+(staffTab==='salary'?'#00d4aa':'#30363d')+';background:'+(staffTab==='salary'?'#00d4aa22':'transparent')+';color:'+(staffTab==='salary'?'#00d4aa':'#7d8590')+';font-family:inherit">💰 My Salary</button></div>';
+
+if(staffTab==='salary'){
+// SALARY TAB - password protected
+var salPwd=selE.salaryPwd||'';
+if(salPwd&&!salaryPwdSet){
+h+='<div style="padding:24px 20px;text-align:center"><div style="font-size:40px;margin-bottom:12px">🔒</div><h3 style="color:#e6edf3;margin-bottom:16px">Salary Protected</h3><input id="salPwdIn" type="password" placeholder="Salary password deen" style="text-align:center;font-size:16px"><button id="salPwdBtn" class="btn bp">Unlock 🔓</button></div>';
+}else{
+// Show salary info
+h+='<div style="padding:20px">';
+// Salary increment blinking message
+var hist=SALHIST[selE.id]||[];
+if(hist.length>0){var latest=hist[0];
+h+='<div style="padding:16px;border-radius:14px;background:linear-gradient(135deg,#00d4aa15,#00d4aa08);border:1px solid #00d4aa33;text-align:center;margin-bottom:16px;animation:salPulse 2s ease-in-out infinite"><div style="display:inline-block;animation:starFloat 1.5s ease-in-out infinite;font-size:24px">🎉</div><div style="color:#00d4aa;font-size:16px;font-weight:700;margin-top:6px">Salary Increased!</div><div style="color:#e6edf3;font-size:22px;font-weight:700;margin-top:4px">₹'+latest.oldSalary.toLocaleString('en-IN')+' → ₹'+latest.newSalary.toLocaleString('en-IN')+'</div><div style="color:#7d8590;font-size:12px;margin-top:6px">Effective from: '+latest.effectiveMonth+'</div></div>';}
+// Current salary card
+h+='<div class="card" style="text-align:center"><div style="color:#7d8590;font-size:12px;margin-bottom:4px">Current Salary</div><div style="color:#00d4aa;font-size:36px;font-weight:700;font-family:Playfair Display,serif">₹'+(selE.salaryType==='monthly'?selE.salary.toLocaleString('en-IN'):selE.dailyRate.toLocaleString('en-IN'))+'</div><div style="color:#7d8590;font-size:12px;margin-top:4px">'+(selE.salaryType==='monthly'?'per month':'per day')+'</div></div>';
+// Salary history
+if(hist.length>0){
+h+='<div class="card"><h3 style="color:#e6edf3;font-size:14px;margin-bottom:12px">📊 Salary History</h3>';
+for(var sh=0;sh<hist.length;sh++){var hi=hist[sh];
+h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;'+(sh<hist.length-1?'border-bottom:1px solid #30363d22':'')+'"><div><div style="color:#e6edf3;font-size:13px">₹'+hi.oldSalary.toLocaleString('en-IN')+' → ₹'+hi.newSalary.toLocaleString('en-IN')+'</div><div style="color:#7d8590;font-size:11px">Effective: '+hi.effectiveMonth+'</div></div><div style="color:#10b981;font-size:16px">📈</div></div>';}
+h+='</div>';}
+// Set/change salary password
+h+='<div class="card"><h3 style="color:#e6edf3;font-size:14px;margin-bottom:12px">🔐 Salary Password</h3><p style="color:#7d8590;font-size:11px;margin-bottom:8px">'+(salPwd?'Password set ache — change korte parben':'Password set korle onno keu dekhte parbe na')+'</p><input id="newSalPwd" type="password" placeholder="'+(salPwd?'New password':'Set password')+'"><button id="setSalPwd" class="btn bp">Save Password 🔐</button></div>';
+h+='</div>';
+}
+}else{
+// ATTENDANCE TAB (existing mark logic)
 var key=selE.id+'_'+today,rec=R[key];
 var cutoff=S.cutoffHr||11,cutoffMin=S.cutoffMin||10;
 var now=new Date(),isLate=now.getHours()>cutoff||(now.getHours()===cutoff&&now.getMinutes()>=cutoffMin);
@@ -206,10 +238,22 @@ var paidMonths='';
 for(var pm=0;pm<3;pm++){var pMonth=(cm-pm+12)%12;var pYear=cm-pm<0?cy-1:cy;var pKey=selE.id+'_'+pYear+'_'+pMonth;var pAdj=ADJ[pKey]||{};
 if(pAdj.paid)paidMonths+='<div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 0"><div style="width:20px;height:20px;border-radius:50%;background:#10b981;display:flex;align-items:center;justify-content:center;font-size:12px">✓</div><span style="color:#10b981;font-size:13px;font-weight:600">'+mn[pMonth]+' '+pYear+' — Salary Paid ✅</span></div>';}
 if(paidMonths)h+='<div style="margin-top:14px;padding:14px 16px;border-radius:14px;background:#10b98108;border:1px solid #10b98122">'+paidMonths+'</div>';
-h+='</div>';}
+h+='</div>';
+} // close attendance tab else
+} // close mark/salary step
 
 app.innerHTML=h;
-document.getElementById('sBack').onclick=function(){if(sStep==='sel'){mode=null;render();}else{sStep='sel';selE=null;pin='';render();}};
+document.getElementById('sBack').onclick=function(){if(sStep==='sel'){mode=null;render();}else{sStep='sel';staffTab='att';salaryPwdSet=false;selE=null;pin='';render();}};
+
+// Tab switching
+var attTab=document.getElementById('staffAttTab');if(attTab)attTab.onclick=function(){staffTab='att';render();};
+var salTab=document.getElementById('staffSalTab');if(salTab)salTab.onclick=function(){staffTab='salary';salaryPwdSet=false;
+// Load salary history
+salHistRef.where('empId','==',selE.id).orderBy('createdAt','desc').get().then(function(s){var arr=[];s.forEach(function(d){arr.push(d.data());});SALHIST[selE.id]=arr;render();}).catch(function(){render();});
+};
+// Salary password
+var salPwdBtn=document.getElementById('salPwdBtn');if(salPwdBtn)salPwdBtn.onclick=function(){var inp=document.getElementById('salPwdIn').value;if(inp===selE.salaryPwd){salaryPwdSet=true;render();}else showToast('❌ Wrong password!');};
+var setSalPwd=document.getElementById('setSalPwd');if(setSalPwd)setSalPwd.onclick=function(){var np=document.getElementById('newSalPwd').value;if(!np||np.length<4)return showToast('Min 4 char!');empRef.doc(selE.id).update({salaryPwd:np}).then(function(){selE.salaryPwd=np;showToast('🔐 Password saved!');render();});};
 var esBs=document.querySelectorAll('.eS');for(var b=0;b<esBs.length;b++)esBs[b].onclick=function(){var id=this.getAttribute('data-i');for(var j=0;j<E.length;j++)if(E[j].id===id){selE=E[j];break;}sStep='pin';pin='';render();};
 var nBs=document.querySelectorAll('.nB');for(var nb=0;nb<nBs.length;nb++)nBs[nb].onclick=function(){var v=this.getAttribute('data-v');if(v==='del')pin=pin.slice(0,-1);else if(pin.length<4)pin+=v;render();};
 var vB=document.getElementById('vBtn');if(vB)vB.onclick=function(){if(pin.length!==4)return showToast('4 digit PIN deen');if(!selE.pin||selE.pin!==pin){showToast('❌ Wrong PIN!');pin='';render();return;}sStep='mark';showToast('💰 Loading...');
@@ -405,7 +449,7 @@ else{var sE=sortedE(),lastType='';
 for(var i=0;i<sE.length;i++){var e=sE[i];
 var curType=e.salaryType==='daily'?'daily':'monthly';
 if(curType!==lastType){h+=catHeader(curType);lastType=curType;}
-h+='<div class="card" style="display:flex;justify-content:space-between;align-items:center"><div style="flex:1"><div style="font-size:15px;font-weight:600;color:#e6edf3">'+e.name+'</div><div style="color:#7d8590;font-size:12px;margin-top:2px">📱 '+(e.phone||'-')+'</div><div style="color:#7d8590;font-size:12px">'+(e.salaryType==='monthly'?'₹'+e.salary+'/month':'₹'+e.dailyRate+'/day')+' | PIN: '+(e.pin||'-')+'</div></div><div style="display:flex;gap:10px"><button data-e="'+e.id+'" class="viewEmpBtn" style="background:none;border:none;font-size:18px;cursor:pointer" title="View month attendance">📅</button><button data-e="'+e.id+'" class="edE" style="background:none;border:none;font-size:18px;cursor:pointer">✏️</button><button data-e="'+e.id+'" class="dlE" style="background:none;border:none;font-size:18px;cursor:pointer">🗑️</button></div></div>';
+h+='<div class="card" style="display:flex;justify-content:space-between;align-items:center"><div style="flex:1"><div style="font-size:15px;font-weight:600;color:#e6edf3">'+e.name+'</div><div style="color:#7d8590;font-size:12px;margin-top:2px">📱 '+(e.phone||'-')+'</div><div style="color:#7d8590;font-size:12px">'+(e.salaryType==='monthly'?'₹'+e.salary+'/month':'₹'+e.dailyRate+'/day')+' | PIN: '+(e.pin||'-')+'</div></div><div style="display:flex;gap:8px"><button data-e="'+e.id+'" class="incSal" style="background:none;border:none;font-size:18px;cursor:pointer" title="Salary increment">📈</button><button data-e="'+e.id+'" class="viewEmpBtn" style="background:none;border:none;font-size:18px;cursor:pointer" title="View month attendance">📅</button><button data-e="'+e.id+'" class="edE" style="background:none;border:none;font-size:18px;cursor:pointer">✏️</button><button data-e="'+e.id+'" class="dlE" style="background:none;border:none;font-size:18px;cursor:pointer">🗑️</button></div></div>';
 }}
 }
 
@@ -509,6 +553,11 @@ var vYEl=document.getElementById('vY');if(vYEl)vYEl.onchange=function(){salY=par
 // Staff - FIXED: proper binding
 var addE=document.getElementById('addE');if(addE)addE.onclick=function(){eId=null;showEF();};
 var edBs=document.querySelectorAll('.edE');for(var eb=0;eb<edBs.length;eb++)edBs[eb].onclick=function(){eId=this.getAttribute('data-e');showEF();};
+
+// Salary Increment
+var incBs=document.querySelectorAll('.incSal');for(var ib=0;ib<incBs.length;ib++)incBs[ib].onclick=function(){
+var eid=this.getAttribute('data-e');showIncForm(eid);
+};
 var dlBs=document.querySelectorAll('.dlE');for(var db2=0;db2<dlBs.length;db2++)dlBs[db2].onclick=function(){var eid=this.getAttribute('data-e');if(confirm('Delete korben?')){empRef.doc(eid).delete().then(function(){E=E.filter(function(x){return x.id!==eid;});showToast('🗑️ Deleted');render();});}};
 
 // Salary
@@ -602,6 +651,38 @@ var svCut=document.getElementById('svCut');if(svCut)svCut.onclick=function(){S.c
 var chP=document.getElementById('chPwd');if(chP)chP.onclick=function(){var np=document.getElementById('nPwd').value;if(!np||np.length<4)return showToast('Min 4 char!');S.adminPwd=np;setRef.set({adminPwd:np},{merge:true}).then(function(){showToast('🔐 Changed!');document.getElementById('nPwd').value='';});};
 var exB=document.getElementById('exB');if(exB)exB.onclick=function(){var d=JSON.stringify({employees:E,records:R,adjustments:ADJ,settings:S},null,2),b=new Blob([d],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='ascent_backup_'+fd()+'.json';a.click();showToast('📤 Exported!');};
 var clB=document.getElementById('clB');if(clB)clB.onclick=function(){if(confirm('SHOB data delete hobe!!')){empRef.get().then(function(s){s.forEach(function(d){d.ref.delete();});});recRef.get().then(function(s){s.forEach(function(d){d.ref.delete();});});adjRef.get().then(function(s){s.forEach(function(d){d.ref.delete();});});E=[];R={};ADJ={};showToast('🗑️ Cleared!');render();}};
+}
+
+/* ===== SALARY INCREMENT FORM ===== */
+function showIncForm(eid){
+var emp=null;for(var i=0;i<E.length;i++)if(E[i].id===eid){emp=E[i];break;}
+if(!emp)return;
+var area=document.getElementById('eFA');if(!area)return;
+var curSal=emp.salaryType==='monthly'?emp.salary:emp.dailyRate;
+var mOpts='';for(var i=0;i<mn.length;i++)mOpts+='<option value="'+mn[i]+'">'+mn[i]+'</option>';
+var yOpts='';for(var yr=2025;yr<=2028;yr++)yOpts+='<option value="'+yr+'"'+(yr===new Date().getFullYear()?' selected':'')+'>'+yr+'</option>';
+area.innerHTML='<div class="card" style="border-color:#00d4aa44"><h3 style="color:#00d4aa;font-size:14px;margin-bottom:12px">📈 Salary Increment — '+emp.name+'</h3>'+
+'<div style="color:#7d8590;font-size:12px;margin-bottom:12px">Current: ₹'+curSal.toLocaleString('en-IN')+(emp.salaryType==='monthly'?'/month':'/day')+'</div>'+
+'<input id="incNewSal" type="number" placeholder="New Salary (₹)" value="">'+
+'<div style="display:flex;gap:8px;margin-bottom:12px"><select id="incMonth" style="flex:1">'+mOpts+'</select><select id="incYear" style="flex:0.6">'+yOpts+'</select></div>'+
+'<div style="display:flex;gap:8px"><button id="incSave" class="btn bp">Save Increment 📈</button><button id="incCancel" class="btn bs" style="width:auto;padding:14px 20px">Cancel</button></div></div>';
+document.getElementById('incSave').onclick=function(){
+var newSal=parseFloat(document.getElementById('incNewSal').value)||0;
+var effMonth=document.getElementById('incMonth').value+' '+document.getElementById('incYear').value;
+if(newSal<=0)return showToast('New salary likhun!');
+if(newSal<=curSal)return showToast('New salary must be higher!');
+var histData={empId:eid,empName:emp.name,oldSalary:curSal,newSalary:newSal,effectiveMonth:effMonth,createdAt:firebase.firestore.FieldValue.serverTimestamp()};
+// Save to history
+salHistRef.add(histData).then(function(){
+// Update employee salary
+var upd=emp.salaryType==='monthly'?{salary:newSal}:{dailyRate:newSal};
+empRef.doc(eid).update(upd).then(function(){
+if(emp.salaryType==='monthly')emp.salary=newSal;else emp.dailyRate=newSal;
+showToast('📈 Salary updated: ₹'+newSal.toLocaleString('en-IN'));render();
+});
+});
+};
+document.getElementById('incCancel').onclick=function(){area.innerHTML='';};
 }
 
 /* ===== EMPLOYEE FORM ===== */
