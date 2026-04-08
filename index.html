@@ -358,35 +358,57 @@ loadLateAllows(function(){loadRecsMonth(new Date().getFullYear(),new Date().getM
 /* ===== CALC SALARY ===== */
 function calcSal(e,y,m){
 var totalDays=dim(y,m);
-var pr2=0,hf2=0,ab2=0,sun=csun(y,m);
+var sun=csun(y,m);
 var td=new Date();
-var todayStr=fd(td);
+var todayDate=new Date(td.getFullYear(),td.getMonth(),td.getDate()); // midnight today
+var monthStart=new Date(y,m,1);
+var monthEnd=new Date(y,m,totalDays,23,59,59);
+// Determine month status
+var isPastMonth=monthEnd<todayDate;      // entire month is in the past
+var isFutureMonth=monthStart>todayDate;  // entire month hasn't started
+// isCurrent = neither past nor future
+
+// If future month: everything is 0
+if(isFutureMonth){
+return {present:0,half:0,absent:0,effective:0,effWithSun:0,paidSundays:0,base:0,overtime:0,otPaid:false,fine:0,net:0,sundays:sun,totalDays:totalDays,perDay:e.salaryType==='monthly'?Math.round(e.salary/30):(e.dailyRate||0)};
+}
+
+var pr2=0,hf2=0,ab2=0;
 var paidSundays=0;
+var presentFullCount=0; // count of present records (for early leave calc)
+
 for(var d=1;d<=totalDays;d++){
 var thisDate=new Date(y,m,d);
-var isPast=thisDate<new Date(td.getFullYear(),td.getMonth(),td.getDate()); // strictly before today
-var isExactlyToday=(fd(thisDate)===todayStr);
+var isPastDay=thisDate<todayDate; // strictly before today
+var isToday=(thisDate.getTime()===todayDate.getTime());
+
+// Only count days that have already passed (or today if record exists)
 if(thisDate.getDay()===0){
 // Sunday = paid holiday for monthly staff
-if(e.salaryType==='monthly'&&(isPast||isExactlyToday))paidSundays++;
+if(e.salaryType==='monthly'&&(isPastDay||isToday))paidSundays++;
 continue;
 }
+
 var dt=y+'-'+String(m+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');
 var rec2=R[e.id+'_'+dt];
+
 if(rec2){
-// Has attendance record
+// Has attendance record (could be past or today)
 if(rec2.status==='present'){
+presentFullCount++;
 if(rec2.earlyHrs){var worked=8-rec2.earlyHrs;pr2+=Math.max(0,Math.round((worked/8)*100)/100);}
 else pr2++;
 }else if(rec2.status==='half')hf2++;
 else if(rec2.status==='early')hf2++;
-else ab2++; // marked absent
-}else if(isPast){
-// Past day with no record = absent (NOT today - today hasn't finished yet)
+else ab2++; // explicitly marked absent
+}else if(isPastDay){
+// Past day with NO record = absent
 ab2++;
 }
-// Future days and today-without-record: not counted at all
+// Today without record = not counted (day not over yet)
+// Future days = not counted
 }
+
 var adjKey=e.id+'_'+y+'_'+m;
 var adj=ADJ[adjKey]||{overtime:0,fine:0};
 var ot=parseFloat(adj.overtime)||0;
@@ -394,40 +416,33 @@ var fine=parseFloat(adj.fine)||0;
 var otPaid=adj.otPaid||false;
 var eff=pr2+hf2*0.5;
 var effWithSun=eff+paidSundays;
-// MONTHLY: salary - (deduction for absent + half + early leave)
-// perDay = salary / 30 always
-// deduction = (absent_full + half*0.5 + early_leave_fraction) * perDay
-// early_leave_fraction is already baked into pr2 (pr2 counts fractional days)
-// So: total unpaid equivalent = ab2 + hf2*0.5 + (countOfPresentDaysWithEarlyLeave - their fractional pr2 contribution)
-// Simpler: unpaid = (total non-Sunday days counted) - effective worked
-// total non-Sunday days counted = pr2_full_count + hf2 + ab2 (but pr2 is fractional...)
-// CLEANEST: deduction = absent*perDay + half*0.5*perDay + earlyLeave deductions
-// pr2 for a full present = 1, for early leave 6hr/8hr = 0.75, so missed = 0.25
-// total_present_count = number of days with status 'present'
-// earlyMiss = total_present_count - pr2
-// total deduction days = ab2 + hf2*0.5 + earlyMiss
+
 var base;
 if(e.salaryType==='monthly'){
 var perDay=e.salary/30;
-// Count actual present records (including early leave fractional)
-var presentCount=0;
-for(var d2=1;d2<=totalDays;d2++){
-if(new Date(y,m,d2).getDay()===0)continue;
-var dt2=y+'-'+String(m+1).padStart(2,'0')+'-'+String(d2).padStart(2,'0');
-var r2=R[e.id+'_'+dt2];
-if(r2&&r2.status==='present')presentCount++;
-}
-var earlyMiss=presentCount-pr2; // fraction lost to early leave
+if(isPastMonth){
+// PAST MONTH: user's formula — salary minus deductions
+// deduction = (absent + half*0.5 + earlyLeave fraction) * perDay
+var earlyMiss=presentFullCount-pr2; // fraction lost to early leave
 var totalDeductDays=ab2+hf2*0.5+earlyMiss;
 base=Math.round(e.salary-totalDeductDays*perDay);
+}else{
+// CURRENT RUNNING MONTH: positive calc — only count what's actually worked
+// workedPay = (present + half*0.5 + paidSundays) * perDay
+var earlyMiss2=presentFullCount-pr2;
+var paidDays=pr2+hf2*0.5+paidSundays;
+base=Math.round(paidDays*perDay);
+}
 if(base>e.salary)base=e.salary;
 if(base<0)base=0;
 }else{
-base=Math.round(e.dailyRate*eff);
+// DAILY STAFF: always positive calc
+base=Math.round((e.dailyRate||0)*eff);
 }
+
 var netOt=otPaid?0:ot;
 var net=base+netOt-fine;
-return {present:pr2,half:hf2,absent:ab2,effective:eff,effWithSun:effWithSun,paidSundays:paidSundays,base:base,overtime:ot,otPaid:otPaid,fine:fine,net:Math.max(0,net),sundays:sun,totalDays:totalDays,perDay:e.salaryType==='monthly'?Math.round(e.salary/30):e.dailyRate};
+return {present:pr2,half:hf2,absent:ab2,effective:eff,effWithSun:effWithSun,paidSundays:paidSundays,base:base,overtime:ot,otPaid:otPaid,fine:fine,net:Math.max(0,net),sundays:sun,totalDays:totalDays,perDay:e.salaryType==='monthly'?Math.round(e.salary/30):(e.dailyRate||0)};
 }
 
 /* ===== ADMIN MODE ===== */
@@ -554,8 +569,10 @@ var wd=dim(salY,salM)-csun(salY,salM);
 var mO='',yO='';for(var i=0;i<mn.length;i++)mO+='<option value="'+i+'"'+(i===salM?' selected':'')+'>'+mn[i]+'</option>';
 for(var yr=2024;yr<=2027;yr++)yO+='<option value="'+yr+'"'+(yr===salY?' selected':'')+'>'+yr+'</option>';
 h+='<h2 class="df" style="font-size:20px;margin-bottom:16px;color:#e6edf3">💰 Salary Report</h2><div style="display:flex;gap:8px;margin-bottom:16px"><select id="sM">'+mO+'</select><select id="sY" style="flex:.6">'+yO+'</select></div>';
-var isRunningMonth=(salM===new Date().getMonth()&&salY===new Date().getFullYear());
-if(isRunningMonth)h+='<div style="text-align:center;padding:8px;margin-bottom:12px;border-radius:10px;background:#fbbf2415;border:1px solid #fbbf2433"><span style="color:#fbbf24;font-size:12px;font-weight:600">⏳ Running Month — salary will update as attendance is marked</span></div>';
+var isRunMon=(salM===new Date().getMonth()&&salY===new Date().getFullYear());
+var isFutMon=new Date(salY,salM,1)>new Date(new Date().getFullYear(),new Date().getMonth(),new Date().getDate());
+if(isRunMon)h+='<div style="text-align:center;padding:8px;margin-bottom:12px;border-radius:10px;background:#fbbf2415;border:1px solid #fbbf2433"><span style="color:#fbbf24;font-size:12px;font-weight:600">⏳ Running Month — till date salary showing</span></div>';
+if(isFutMon)h+='<div style="text-align:center;padding:8px;margin-bottom:12px;border-radius:10px;background:#ff6b6b15;border:1px solid #ff6b6b33"><span style="color:#ff6b6b;font-size:12px;font-weight:600">📅 Future Month — no data yet</span></div>';
 h+='<div class="card" style="display:flex;justify-content:space-around"><div style="text-align:center"><div style="font-size:18px;font-weight:700;color:#e6edf3">'+dim(salY,salM)+'</div><div style="font-size:10px;color:#7d8590">Total Days</div></div><div style="text-align:center"><div style="font-size:18px;font-weight:700;color:#00d4aa">'+wd+'</div><div style="font-size:10px;color:#7d8590">Working</div></div><div style="text-align:center"><div style="font-size:18px;font-weight:700;color:#fbbf24">'+csun(salY,salM)+'</div><div style="font-size:10px;color:#7d8590">Sundays</div></div></div>';
 var total=0;
 var sE=sortedE(),lastType='';
