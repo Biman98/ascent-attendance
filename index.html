@@ -358,21 +358,34 @@ loadLateAllows(function(){loadRecsMonth(new Date().getFullYear(),new Date().getM
 /* ===== CALC SALARY ===== */
 function calcSal(e,y,m){
 var totalDays=dim(y,m);
-var pr2=0,hf2=0,ab2=0,sun=csun(y,m),td=new Date();
+var pr2=0,hf2=0,ab2=0,sun=csun(y,m);
+var td=new Date();
+var todayStr=fd(td);
 var paidSundays=0;
 for(var d=1;d<=totalDays;d++){
-var isToday=new Date(y,m,d)<=td;
-if(new Date(y,m,d).getDay()===0){
-if(e.salaryType==='monthly'&&isToday)paidSundays++;
+var thisDate=new Date(y,m,d);
+var isPast=thisDate<new Date(td.getFullYear(),td.getMonth(),td.getDate()); // strictly before today
+var isExactlyToday=(fd(thisDate)===todayStr);
+if(thisDate.getDay()===0){
+// Sunday = paid holiday for monthly staff
+if(e.salaryType==='monthly'&&(isPast||isExactlyToday))paidSundays++;
 continue;
 }
 var dt=y+'-'+String(m+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');
 var rec2=R[e.id+'_'+dt];
-if(rec2){if(rec2.status==='present'){
+if(rec2){
+// Has attendance record
+if(rec2.status==='present'){
 if(rec2.earlyHrs){var worked=8-rec2.earlyHrs;pr2+=Math.max(0,Math.round((worked/8)*100)/100);}
 else pr2++;
-}else if(rec2.status==='half')hf2++;else if(rec2.status==='early'){hf2++;}else ab2++;}
-else if(isToday)ab2++;
+}else if(rec2.status==='half')hf2++;
+else if(rec2.status==='early')hf2++;
+else ab2++; // marked absent
+}else if(isPast){
+// Past day with no record = absent (NOT today - today hasn't finished yet)
+ab2++;
+}
+// Future days and today-without-record: not counted at all
 }
 var adjKey=e.id+'_'+y+'_'+m;
 var adj=ADJ[adjKey]||{overtime:0,fine:0};
@@ -381,30 +394,32 @@ var fine=parseFloat(adj.fine)||0;
 var otPaid=adj.otPaid||false;
 var eff=pr2+hf2*0.5;
 var effWithSun=eff+paidSundays;
-// MONTHLY STAFF: Full salary minus deductions for absent/half days
-// perDay = salary / 30 (always 30, regardless of month length)
-// absentDeduction = (absent + half*0.5) * perDay
-// base = salary - absentDeduction
-// DAILY STAFF: dailyRate * effective days (unchanged)
+// MONTHLY: salary - (deduction for absent + half + early leave)
+// perDay = salary / 30 always
+// deduction = (absent_full + half*0.5 + early_leave_fraction) * perDay
+// early_leave_fraction is already baked into pr2 (pr2 counts fractional days)
+// So: total unpaid equivalent = ab2 + hf2*0.5 + (countOfPresentDaysWithEarlyLeave - their fractional pr2 contribution)
+// Simpler: unpaid = (total non-Sunday days counted) - effective worked
+// total non-Sunday days counted = pr2_full_count + hf2 + ab2 (but pr2 is fractional...)
+// CLEANEST: deduction = absent*perDay + half*0.5*perDay + earlyLeave deductions
+// pr2 for a full present = 1, for early leave 6hr/8hr = 0.75, so missed = 0.25
+// total_present_count = number of days with status 'present'
+// earlyMiss = total_present_count - pr2
+// total deduction days = ab2 + hf2*0.5 + earlyMiss
 var base;
 if(e.salaryType==='monthly'){
 var perDay=e.salary/30;
-var absentDeduction=(ab2+hf2*0.5)*perDay;
-// Also deduct early leave fractional days from present
-var earlyDeduction=(pr2-Math.floor(pr2))<0?0:0;
-// pr2 already has fractional counted (e.g. 0.75 for 6hr work), so missed part = count of present days minus pr2
-// Actually pr2 already accounts for early leave. absentDays = ab2, halfDays reduce by 0.5
-// Simple: deduction = absent*perDay + half*0.5*perDay + earlyLeave fractional
-// But pr2 already has early leave factored as fraction. Let's use: base = salary - (ab2 + hf2*0.5)*perDay - earlyLeaveFraction
-// Easier approach: count total unpaid days
-// totalWorkDays (non-Sunday) = totalDays - sun
-// workedEquivalent = pr2 + hf2*0.5  (pr2 already has early leave fraction)
-// missedDays = totalWorkDays counted so far (excluding future) - workedEquivalent
-// But for simplicity matching user's formula: salary - absent_days * perDay
-// absent_days includes full absents + half*0.5, early leave fractions already reduce pr2
-var totalCountedWorkDays=pr2+hf2+ab2; // all non-Sunday days counted so far
-var unpaidDays=totalCountedWorkDays-eff; // eff = pr2 + hf2*0.5, so unpaid = ab2 + hf2*0.5 + (full presents - fractional presents from early leave)
-base=Math.round(e.salary-unpaidDays*perDay);
+// Count actual present records (including early leave fractional)
+var presentCount=0;
+for(var d2=1;d2<=totalDays;d2++){
+if(new Date(y,m,d2).getDay()===0)continue;
+var dt2=y+'-'+String(m+1).padStart(2,'0')+'-'+String(d2).padStart(2,'0');
+var r2=R[e.id+'_'+dt2];
+if(r2&&r2.status==='present')presentCount++;
+}
+var earlyMiss=presentCount-pr2; // fraction lost to early leave
+var totalDeductDays=ab2+hf2*0.5+earlyMiss;
+base=Math.round(e.salary-totalDeductDays*perDay);
 if(base>e.salary)base=e.salary;
 if(base<0)base=0;
 }else{
@@ -412,7 +427,7 @@ base=Math.round(e.dailyRate*eff);
 }
 var netOt=otPaid?0:ot;
 var net=base+netOt-fine;
-return {present:pr2,half:hf2,absent:ab2,effective:eff,effWithSun:effWithSun,paidSundays:paidSundays,base:base,overtime:ot,otPaid:otPaid,fine:fine,net:Math.max(0,net),sundays:sun,totalDays:totalDays};
+return {present:pr2,half:hf2,absent:ab2,effective:eff,effWithSun:effWithSun,paidSundays:paidSundays,base:base,overtime:ot,otPaid:otPaid,fine:fine,net:Math.max(0,net),sundays:sun,totalDays:totalDays,perDay:e.salaryType==='monthly'?Math.round(e.salary/30):e.dailyRate};
 }
 
 /* ===== ADMIN MODE ===== */
@@ -539,6 +554,8 @@ var wd=dim(salY,salM)-csun(salY,salM);
 var mO='',yO='';for(var i=0;i<mn.length;i++)mO+='<option value="'+i+'"'+(i===salM?' selected':'')+'>'+mn[i]+'</option>';
 for(var yr=2024;yr<=2027;yr++)yO+='<option value="'+yr+'"'+(yr===salY?' selected':'')+'>'+yr+'</option>';
 h+='<h2 class="df" style="font-size:20px;margin-bottom:16px;color:#e6edf3">💰 Salary Report</h2><div style="display:flex;gap:8px;margin-bottom:16px"><select id="sM">'+mO+'</select><select id="sY" style="flex:.6">'+yO+'</select></div>';
+var isRunningMonth=(salM===new Date().getMonth()&&salY===new Date().getFullYear());
+if(isRunningMonth)h+='<div style="text-align:center;padding:8px;margin-bottom:12px;border-radius:10px;background:#fbbf2415;border:1px solid #fbbf2433"><span style="color:#fbbf24;font-size:12px;font-weight:600">⏳ Running Month — salary will update as attendance is marked</span></div>';
 h+='<div class="card" style="display:flex;justify-content:space-around"><div style="text-align:center"><div style="font-size:18px;font-weight:700;color:#e6edf3">'+dim(salY,salM)+'</div><div style="font-size:10px;color:#7d8590">Total Days</div></div><div style="text-align:center"><div style="font-size:18px;font-weight:700;color:#00d4aa">'+wd+'</div><div style="font-size:10px;color:#7d8590">Working</div></div><div style="text-align:center"><div style="font-size:18px;font-weight:700;color:#fbbf24">'+csun(salY,salM)+'</div><div style="font-size:10px;color:#7d8590">Sundays</div></div></div>';
 var total=0;
 var sE=sortedE(),lastType='';
