@@ -111,7 +111,7 @@ adjRef.where('month','==',String(m+1).padStart(2,'0')).where('year','==',String(
 var _salHistLoaded=false;
 function loadAllSalHist(cb){
 if(_salHistLoaded){if(cb)cb();return;}
-salHistRef.orderBy('createdAt','desc').get().then(function(snap){
+salHistRef.get().then(function(snap){
 snap.forEach(function(d){var o=d.data();o._id=d.id;
 if(!SALHIST[o.empId])SALHIST[o.empId]=[];
 // Avoid duplicates
@@ -339,7 +339,7 @@ document.getElementById('sBack').onclick=function(){if(sStep==='sel'){mode=null;
 var attTab=document.getElementById('staffAttTab');if(attTab)attTab.onclick=function(){staffTab='att';staffSalBdOpen=false;render();};
 var salTab=document.getElementById('staffSalTab');if(salTab)salTab.onclick=function(){staffTab='salary';salaryPwdSet=false;staffSalBdOpen=false;
 // Load salary history
-salHistRef.where('empId','==',selE.id).orderBy('createdAt','desc').get().then(function(s){var arr=[];s.forEach(function(d){var o=d.data();o._id=d.id;arr.push(o);});SALHIST[selE.id]=arr;render();}).catch(function(){render();});
+salHistRef.where('empId','==',selE.id).get().then(function(s){var arr=[];s.forEach(function(d){var o=d.data();o._id=d.id;arr.push(o);});arr.sort(function(a,b){var ta=a.createdAt?((typeof a.createdAt.toDate==='function')?a.createdAt.toDate().getTime():((a.createdAt.seconds||0)*1000)):0;var tb=b.createdAt?((typeof b.createdAt.toDate==='function')?b.createdAt.toDate().getTime():((b.createdAt.seconds||0)*1000)):0;return tb-ta;});SALHIST[selE.id]=arr;render();}).catch(function(){render();});
 };
 // Salary password
 var salPwdBtn=document.getElementById('salPwdBtn');if(salPwdBtn)salPwdBtn.onclick=function(){var inp=document.getElementById('salPwdIn').value;if(inp===selE.salaryPwd){salaryPwdSet=true;render();}else showToast('❌ Wrong password!');};
@@ -856,8 +856,9 @@ if(!emp)return;
 var area=document.getElementById('eFA');if(!area)return;
 var curSal=emp.salaryType==='monthly'?emp.salary:emp.dailyRate;
 // Load salary history first to show existing increments
-salHistRef.where('empId','==',eid).orderBy('createdAt','desc').get().then(function(snap){
+salHistRef.where('empId','==',eid).get().then(function(snap){
 var histArr=[];snap.forEach(function(d){histArr.push(Object.assign({_id:d.id},d.data()));});
+histArr.sort(function(a,b){var ta=a.createdAt?((typeof a.createdAt.toDate==='function')?a.createdAt.toDate().getTime():((a.createdAt.seconds||0)*1000)):0;var tb=b.createdAt?((typeof b.createdAt.toDate==='function')?b.createdAt.toDate().getTime():((b.createdAt.seconds||0)*1000)):0;return tb-ta;});
 SALHIST[eid]=histArr;
 
 // Build month options — current month onwards (no past months to prevent confusion)
@@ -1008,7 +1009,7 @@ showIncForm(dEid);
 }
 }).catch(function(){showToast('❌ Delete failed!');});
 };
-}).catch(function(){showToast('❌ History load failed!');});
+}).catch(function(err){showToast('❌ Load error: '+(err.message||'Try again'));console.error('SalHist load error:',err);});
 }
 
 /* ===== EMPLOYEE FORM ===== */
