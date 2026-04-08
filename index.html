@@ -188,25 +188,34 @@ h+='<div style="padding:24px 20px;text-align:center"><div style="font-size:40px;
 }else{
 // Show salary info
 h+='<div style="padding:20px">';
-// === CONGRATULATIONS - Salary Increment (show for 30 days) ===
+// === CONGRATULATIONS - Salary Increment ===
 var hist=SALHIST[selE.id]||[];
 if(hist.length>0){var latest=hist[0];
-var nowD=new Date(),curMonLabel=mn[nowD.getMonth()]+' '+nowD.getFullYear();
+var nowD=new Date();
 var showCongrats=false;
-// Show if effectiveMonth matches current month
-if(latest.effectiveMonth===curMonLabel)showCongrats=true;
-// Also show if created within last 30 days
+// Method 1: effectiveMonth matches current month
+var curMonLabel=mn[nowD.getMonth()]+' '+nowD.getFullYear();
+if(latest.effectiveMonth&&latest.effectiveMonth.trim()===curMonLabel)showCongrats=true;
+// Method 2: created within last 30 days
 if(!showCongrats&&latest.createdAt){
-try{var cDate=latest.createdAt.toDate?latest.createdAt.toDate():(latest.createdAt.seconds?new Date(latest.createdAt.seconds*1000):new Date(latest.createdAt));
-var daysSince=Math.floor((nowD-cDate)/(1000*60*60*24));
-if(daysSince>=0&&daysSince<=30)showCongrats=true;}catch(ce){showCongrats=true;}
+try{
+var cDate;
+if(typeof latest.createdAt.toDate==='function')cDate=latest.createdAt.toDate();
+else if(latest.createdAt.seconds)cDate=new Date(latest.createdAt.seconds*1000);
+else cDate=new Date(latest.createdAt);
+if(cDate&&!isNaN(cDate.getTime())){
+var daysDiff=Math.floor((nowD.getTime()-cDate.getTime())/(86400000));
+if(daysDiff>=0&&daysDiff<=30)showCongrats=true;
 }
-// Fallback: if history exists and latest increment is within current month name
-if(!showCongrats){
-var effParts=latest.effectiveMonth?latest.effectiveMonth.split(' '):[];
-if(effParts.length===2){
-var eM=mn.indexOf(effParts[0]),eY=parseInt(effParts[1]);
-if(eY===nowD.getFullYear()&&eM===nowD.getMonth())showCongrats=true;
+}catch(ce2){/* ignore */}
+}
+// Method 3: parse effectiveMonth manually
+if(!showCongrats&&latest.effectiveMonth){
+var parts=latest.effectiveMonth.trim().split(' ');
+if(parts.length>=2){
+var mi=mn.indexOf(parts[0]);
+var yi=parseInt(parts[parts.length-1]);
+if(mi===nowD.getMonth()&&yi===nowD.getFullYear())showCongrats=true;
 }
 }
 if(showCongrats){
@@ -248,7 +257,7 @@ h+='<div style="display:flex;justify-content:space-between;padding:6px 0;border-
 h+='<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #30363d22"><span style="color:#7d8590;font-size:12px">Half Day</span><span style="color:#fbbf24;font-size:13px;font-weight:600">'+prevSc2.half+' days</span></div>';
 h+='<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #30363d22"><span style="color:#7d8590;font-size:12px">Absent</span><span style="color:#ff6b6b;font-size:13px;font-weight:600">'+prevSc2.absent+' days</span></div>';
 if(prevSc2.overtime>0)h+='<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #30363d22"><span style="color:#7d8590;font-size:12px">Overtime</span><span style="color:#10b981;font-size:13px;font-weight:600">+₹'+prevSc2.overtime.toLocaleString('en-IN')+'</span></div>';
-if(prevSc2.fine>0)h+='<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #30363d22"><span style="color:#7d8590;font-size:12px">Fine</span><span style="color:#ff6b6b;font-size:13px;font-weight:600">-₹'+prevSc2.fine.toLocaleString('en-IN')+'</span></div>';
+if(prevSc2.fine>0)h+='<div style="display:flex;justify-content:space-between;padding:6px 0"><span style="color:#7d8590;font-size:12px">Fine</span><span style="color:#ff6b6b;font-size:13px;font-weight:600">-₹'+prevSc2.fine.toLocaleString('en-IN')+'</span></div>';
 h+='</div>';
 }
 h+='</div>';
@@ -368,38 +377,22 @@ loadLateAllows(function(){loadRecsMonth(new Date().getFullYear(),new Date().getM
 },function(){showToast('📍 Location ON korun!');},{enableHighAccuracy:true,timeout:15000});
 }
 
-/* ===== GET SALARY FOR SPECIFIC MONTH (respects increment history) ===== */
+/* ===== GET SALARY FOR SPECIFIC MONTH ===== */
 function getSalForMonth(e,y,m){
-// Returns the salary that was effective for the given month
-// Checks SALHIST to find what salary applied at that time
-// effectiveMonth format: "April 2026"
-var monthLabel=mn[m]+' '+y;
 var hist=SALHIST[e.id]||[];
 if(hist.length===0)return e.salaryType==='monthly'?e.salary:(e.dailyRate||0);
-// Sort history by effective month (newest first) - already sorted by createdAt desc
-// Find the salary that was active during the target month
-// Logic: walk through history from newest to oldest
-// The salary for a month is the newSalary of the most recent increment
-// whose effectiveMonth is <= the target month
 for(var i=0;i<hist.length;i++){
 var h2=hist[i];
-var effParts=h2.effectiveMonth?h2.effectiveMonth.split(' '):[];
+var effParts=(h2.effectiveMonth||'').split(' ');
 if(effParts.length===2){
 var effMIdx=mn.indexOf(effParts[0]);
 var effY=parseInt(effParts[1]);
 if(effMIdx>=0&&effY>0){
-// If target month is >= effective month, this increment applies
-if(y>effY||(y===effY&&m>=effMIdx)){
-return h2.newSalary;
+if(y>effY||(y===effY&&m>=effMIdx))return h2.newSalary;
 }
 }
 }
-}
-// If no increment applies (target month is before all increments), use oldest oldSalary
-if(hist.length>0){
 return hist[hist.length-1].oldSalary;
-}
-return e.salaryType==='monthly'?e.salary:(e.dailyRate||0);
 }
 
 /* ===== CALC SALARY ===== */
@@ -407,42 +400,34 @@ function calcSal(e,y,m){
 var totalDays=dim(y,m);
 var sun=csun(y,m);
 var td=new Date();
-var todayDate=new Date(td.getFullYear(),td.getMonth(),td.getDate());
-var monthStart=new Date(y,m,1);
+var todayMid=new Date(td.getFullYear(),td.getMonth(),td.getDate());
 var monthEnd=new Date(y,m,totalDays,23,59,59);
-var isPastMonth=monthEnd<todayDate;
-var isFutureMonth=monthStart>todayDate;
-
-// Use correct salary for this specific month (respects increment history)
+var isPastMonth=monthEnd<todayMid;
+var isFutureMonth=new Date(y,m,1)>todayMid;
 var monthlySal=e.salaryType==='monthly'?getSalForMonth(e,y,m):0;
 var dailyR=e.salaryType==='daily'?getSalForMonth(e,y,m):0;
-
 if(isFutureMonth){
 return {present:0,half:0,absent:0,effective:0,effWithSun:0,paidSundays:0,base:0,overtime:0,otPaid:false,fine:0,net:0,sundays:sun,totalDays:totalDays,perDay:e.salaryType==='monthly'?Math.round(monthlySal/30):dailyR,monthlySal:monthlySal};
 }
-
 var pr2=0,hf2=0,ab2=0,paidSundays=0,presentFullCount=0;
 for(var d=1;d<=totalDays;d++){
 var thisDate=new Date(y,m,d);
-var isPastDay=thisDate<todayDate;
-var isToday=(thisDate.getTime()===todayDate.getTime());
+var isPastDay=thisDate<todayMid;
+var isToday2=(thisDate.getTime()===todayMid.getTime());
 if(thisDate.getDay()===0){
-if(e.salaryType==='monthly'&&(isPastDay||isToday))paidSundays++;
+if(e.salaryType==='monthly'&&(isPastDay||isToday2))paidSundays++;
 continue;
 }
 var dt=y+'-'+String(m+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');
 var rec2=R[e.id+'_'+dt];
 if(rec2){
-if(rec2.status==='present'){
-presentFullCount++;
+if(rec2.status==='present'){presentFullCount++;
 if(rec2.earlyHrs){var worked=8-rec2.earlyHrs;pr2+=Math.max(0,Math.round((worked/8)*100)/100);}
 else pr2++;
 }else if(rec2.status==='half')hf2++;
 else if(rec2.status==='early')hf2++;
 else ab2++;
-}else if(isPastDay){
-ab2++;
-}
+}else if(isPastDay){ab2++;}
 }
 var adjKey=e.id+'_'+y+'_'+m;
 var adj=ADJ[adjKey]||{overtime:0,fine:0};
@@ -451,17 +436,14 @@ var fine=parseFloat(adj.fine)||0;
 var otPaid=adj.otPaid||false;
 var eff=pr2+hf2*0.5;
 var effWithSun=eff+paidSundays;
-
 var base;
 if(e.salaryType==='monthly'){
 var perDay=monthlySal/30;
 if(isPastMonth){
-// PAST: salary - deductions
 var earlyMiss=presentFullCount-pr2;
 var totalDeductDays=ab2+hf2*0.5+earlyMiss;
 base=Math.round(monthlySal-totalDeductDays*perDay);
 }else{
-// RUNNING: positive calc - only count worked days
 var paidDays=pr2+hf2*0.5+paidSundays;
 base=Math.round(paidDays*perDay);
 }
