@@ -609,18 +609,74 @@ var isFutMon=new Date(salY,salM,1)>new Date(new Date().getFullYear(),new Date().
 if(isRunMon)h+='<div style="text-align:center;padding:8px;margin-bottom:12px;border-radius:10px;background:#fbbf2415;border:1px solid #fbbf2433"><span style="color:#fbbf24;font-size:12px;font-weight:600">⏳ Running Month — till date salary</span></div>';
 if(isFutMon)h+='<div style="text-align:center;padding:8px;margin-bottom:12px;border-radius:10px;background:#ff6b6b15;border:1px solid #ff6b6b33"><span style="color:#ff6b6b;font-size:12px;font-weight:600">📅 Future Month — no data yet</span></div>';
 h+='<div class="card" style="display:flex;justify-content:space-around"><div style="text-align:center"><div style="font-size:18px;font-weight:700;color:#e6edf3">'+dim(salY,salM)+'</div><div style="font-size:10px;color:#7d8590">Total Days</div></div><div style="text-align:center"><div style="font-size:18px;font-weight:700;color:#00d4aa">'+wd+'</div><div style="font-size:10px;color:#7d8590">Working</div></div><div style="text-align:center"><div style="font-size:18px;font-weight:700;color:#fbbf24">'+csun(salY,salM)+'</div><div style="font-size:10px;color:#7d8590">Sundays</div></div></div>';
-var total=0;
+var total=0,totalPaidAll=0;
 var sE=sortedE(),lastType='';
 for(var i=0;i<sE.length;i++){var e=sE[i];
 var curType=e.salaryType==='daily'?'daily':'monthly';
 if(curType!==lastType){h+=catHeader(curType);lastType=curType;}
-var sc=calcSal(e,salY,salM);total+=sc.net;
-h+='<div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:10px"><div><div style="font-size:15px;font-weight:600;color:#e6edf3">'+e.name+'</div><div style="color:#7d8590;font-size:11px">'+(e.salaryType==='monthly'?'Base: ₹'+(sc.monthlySal||e.salary)+'/mo (÷30)':'Rate: ₹'+(sc.perDay||e.dailyRate)+'/day')+'</div></div><div style="text-align:right"><div style="color:#00d4aa;font-size:20px;font-weight:700">₹'+sc.net.toLocaleString('en-IN')+'</div><div style="color:#7d8590;font-size:11px">Net Pay</div></div></div>';
-h+='<div style="display:grid;grid-template-columns:'+(e.salaryType==='monthly'?'1fr 1fr 1fr 1fr 1fr':'1fr 1fr 1fr 1fr')+';gap:6px;background:#0c1117;border-radius:10px;padding:10px;margin-bottom:10px"><div style="text-align:center"><div style="font-size:14px;font-weight:700;color:#10b981">'+sc.present+'</div><div style="font-size:10px;color:#7d8590">Present</div></div><div style="text-align:center"><div style="font-size:14px;font-weight:700;color:#fbbf24">'+sc.half+'</div><div style="font-size:10px;color:#7d8590">Half</div></div><div style="text-align:center"><div style="font-size:14px;font-weight:700;color:#ff6b6b">'+sc.absent+'</div><div style="font-size:10px;color:#7d8590">Absent</div></div>'+(e.salaryType==='monthly'?'<div style="text-align:center"><div style="font-size:14px;font-weight:700;color:#60a5fa">'+sc.paidSundays+'</div><div style="font-size:10px;color:#7d8590">Sun(Paid)</div></div>':'')+'<div style="text-align:center"><div style="font-size:14px;font-weight:700;color:#e6edf3">'+(e.salaryType==='monthly'?sc.effWithSun:sc.effective)+'</div><div style="font-size:10px;color:#7d8590">Effective</div></div></div>';
-// Overtime & Fine - always editable
+var sc=calcSal(e,salY,salM);
 var adjKey2=e.id+'_'+salY+'_'+salM;var curAdj=ADJ[adjKey2]||{};
 var isPaid=curAdj.paid||false;
 var isOtPaid=curAdj.otPaid||false;
+var coreVal=e.isCore?(parseFloat(curAdj.coreSalary)||0):0;
+var isCorePaid=curAdj.corePaid||false;
+
+// Calculate grand total = net pay + core salary + OT (if not already in net)
+// Note: sc.net already includes OT if not otPaid, and excludes OT if otPaid
+// So grand total = base_net_without_ot_adjustment + OT + core
+var baseNetNoOt=sc.base-sc.fine; // net without any OT
+if(baseNetNoOt<0)baseNetNoOt=0;
+var grandTotal=baseNetNoOt+sc.overtime+coreVal;
+
+// Calculate paid amount
+var paidAmt=0;
+if(isPaid)paidAmt+=sc.net; // main salary paid (includes OT if not separately paid)
+if(isOtPaid)paidAmt+=sc.overtime; // OT paid separately
+if(isCorePaid)paidAmt+=coreVal; // core paid
+
+// Remaining
+var remaining=grandTotal-paidAmt;
+if(remaining<0)remaining=0;
+var allPaid=(isPaid&&(!sc.overtime||isOtPaid)&&(!coreVal||isCorePaid));
+
+total+=grandTotal;
+totalPaidAll+=paidAmt;
+
+// === CARD START ===
+h+='<div class="card">';
+// Header: name + grand total / remaining
+h+='<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">';
+h+='<div><div style="font-size:15px;font-weight:600;color:#e6edf3">'+e.name+'</div>';
+h+='<div style="color:#7d8590;font-size:11px">'+(e.salaryType==='monthly'?'Base: ₹'+(sc.monthlySal||e.salary)+'/mo (÷30)':'Rate: ₹'+(sc.perDay||e.dailyRate)+'/day')+'</div></div>';
+h+='<div style="text-align:right">';
+if(allPaid){
+// All paid — show ₹0 + paid badge
+h+='<div style="color:#10b981;font-size:20px;font-weight:700">₹0</div>';
+h+='<div style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:20px;background:#10b98122;border:1px solid #10b98133;margin-top:3px"><span style="font-size:11px">✅</span><span style="color:#10b981;font-size:11px;font-weight:700">Paid ₹'+grandTotal.toLocaleString('en-IN')+'</span></div>';
+}else if(paidAmt>0){
+// Partially paid
+h+='<div style="color:#fbbf24;font-size:20px;font-weight:700">₹'+remaining.toLocaleString('en-IN')+'</div>';
+h+='<div style="color:#7d8590;font-size:10px">remaining</div>';
+h+='<div style="display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:20px;background:#10b98115;margin-top:2px"><span style="font-size:9px">✅</span><span style="color:#10b981;font-size:10px;font-weight:600">₹'+paidAmt.toLocaleString('en-IN')+' paid</span></div>';
+}else{
+// Nothing paid
+h+='<div style="color:#00d4aa;font-size:20px;font-weight:700">₹'+grandTotal.toLocaleString('en-IN')+'</div>';
+h+='<div style="color:#7d8590;font-size:10px">Total Due</div>';
+}
+h+='</div></div>';
+
+// Breakdown mini-bar (only if there are multiple components)
+if(coreVal>0||sc.overtime>0){
+h+='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;padding:8px 10px;border-radius:8px;background:#0c1117">';
+h+='<div style="display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:50%;background:#00d4aa;display:inline-block"></span><span style="color:#7d8590;font-size:10px">Salary ₹'+sc.net.toLocaleString('en-IN')+'</span>'+(isPaid?'<span style="font-size:9px">✅</span>':'')+'</div>';
+if(sc.overtime>0)h+='<div style="display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:50%;background:#fbbf24;display:inline-block"></span><span style="color:#7d8590;font-size:10px">OT ₹'+sc.overtime.toLocaleString('en-IN')+'</span>'+(isOtPaid?'<span style="font-size:9px">✅</span>':'')+'</div>';
+if(coreVal>0)h+='<div style="display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:50%;background:#a78bfa;display:inline-block"></span><span style="color:#7d8590;font-size:10px">Core ₹'+coreVal.toLocaleString('en-IN')+'</span>'+(isCorePaid?'<span style="font-size:9px">✅</span>':'')+'</div>';
+h+='</div>';
+}
+
+// Attendance grid
+h+='<div style="display:grid;grid-template-columns:'+(e.salaryType==='monthly'?'1fr 1fr 1fr 1fr 1fr':'1fr 1fr 1fr 1fr')+';gap:6px;background:#0c1117;border-radius:10px;padding:10px;margin-bottom:10px"><div style="text-align:center"><div style="font-size:14px;font-weight:700;color:#10b981">'+sc.present+'</div><div style="font-size:10px;color:#7d8590">Present</div></div><div style="text-align:center"><div style="font-size:14px;font-weight:700;color:#fbbf24">'+sc.half+'</div><div style="font-size:10px;color:#7d8590">Half</div></div><div style="text-align:center"><div style="font-size:14px;font-weight:700;color:#ff6b6b">'+sc.absent+'</div><div style="font-size:10px;color:#7d8590">Absent</div></div>'+(e.salaryType==='monthly'?'<div style="text-align:center"><div style="font-size:14px;font-weight:700;color:#60a5fa">'+sc.paidSundays+'</div><div style="font-size:10px;color:#7d8590">Sun(Paid)</div></div>':'')+'<div style="text-align:center"><div style="font-size:14px;font-weight:700;color:#e6edf3">'+(e.salaryType==='monthly'?sc.effWithSun:sc.effective)+'</div><div style="font-size:10px;color:#7d8590">Effective</div></div></div>';
+// Overtime & Fine inputs
 h+='<div style="display:flex;gap:6px;margin-bottom:8px"><div style="flex:1;display:flex;align-items:center;gap:4px"><span style="color:#10b981;font-size:12px">OT ₹</span><input data-eid="'+e.id+'" class="otIn" type="number" placeholder="0" value="'+(sc.overtime||0)+'" style="margin:0;padding:8px;font-size:13px"></div><div style="flex:1;display:flex;align-items:center;gap:4px"><span style="color:#ff6b6b;font-size:12px">Fine ₹</span><input data-eid="'+e.id+'" class="fnIn" type="number" placeholder="0" value="'+(sc.fine||0)+'" style="margin:0;padding:8px;font-size:13px"></div></div>';
 h+='<div style="display:flex;gap:6px;margin-bottom:6px"><button data-eid="'+e.id+'" class="saveAdj btn bp" style="padding:8px;font-size:12px">💾 Save</button><button data-eid="'+e.id+'" class="clrAdj btn bs" style="padding:8px;font-size:12px;width:auto">🗑️ Clear</button><button data-eid="'+e.id+'" class="dlSlip btn bs" style="padding:8px;font-size:12px;width:auto;flex:1">📄 Slip</button></div>';
 // OT Paid separately
@@ -631,10 +687,8 @@ if(isOtPaid)h+='<div style="text-align:center;color:#fbbf24;font-size:11px;margi
 // Salary Paid status
 h+='<div style="display:flex;gap:6px"><button data-eid="'+e.id+'" class="markPaid btn '+(isPaid?'bs':'bp')+'" style="padding:8px;font-size:12px">'+(isPaid?'✅ Salary Paid — Undo':'💰 Mark Salary Paid')+'</button></div>';
 if(isPaid)h+='<div style="text-align:center;margin-top:6px;color:#10b981;font-size:11px">✅ Salary paid on '+(curAdj.paidDate||'')+'</div>';
-// CORE TEAM EXTRA SALARY (only for core members)
+// CORE TEAM EXTRA SALARY
 if(e.isCore){
-var coreVal=parseFloat(curAdj.coreSalary)||0;
-var isCorePaid=curAdj.corePaid||false;
 h+='<div style="margin-top:8px;padding:10px;border-radius:10px;background:#a78bfa11;border:1px solid #a78bfa33"><div style="display:flex;align-items:center;gap:6px;margin-bottom:8px"><span style="font-size:14px">⭐</span><span style="color:#a78bfa;font-size:13px;font-weight:700">Core Team Extra Salary</span></div>';
 h+='<div style="display:flex;gap:6px;margin-bottom:6px"><div style="flex:1;display:flex;align-items:center;gap:4px"><span style="color:#a78bfa;font-size:12px">₹</span><input data-eid="'+e.id+'" class="coreIn" type="number" placeholder="0" value="'+coreVal+'" style="margin:0;padding:8px;font-size:13px"></div><button data-eid="'+e.id+'" class="saveCore btn" style="padding:8px;font-size:12px;width:auto;background:#a78bfa;color:#0c1117;border:none">💾 Save</button></div>';
 h+='<div style="display:flex;gap:6px"><button data-eid="'+e.id+'" class="payCore btn '+(isCorePaid?'bs':'bp')+'" style="padding:8px;font-size:12px;background:'+(isCorePaid?'transparent':'#a78bfa')+';color:'+(isCorePaid?'#a78bfa':'#0c1117')+';border:'+(isCorePaid?'1px solid #a78bfa':'none')+'">'+(isCorePaid?'✅ Core ₹'+coreVal+' Paid — Undo':'💎 Pay Core ₹'+coreVal)+'</button></div>';
@@ -642,7 +696,20 @@ if(isCorePaid)h+='<div style="text-align:center;color:#a78bfa;font-size:11px;mar
 h+='</div>';
 }
 h+='</div>';}
-if(E.length)h+='<div style="background:#00d4aa22;border-radius:14px;padding:16px;border:1px solid #00d4aa44;text-align:center"><div style="color:#7d8590;font-size:13px">Total Monthly Payout</div><div style="color:#00d4aa;font-size:28px;font-weight:700">₹'+total.toLocaleString('en-IN')+'</div></div>';
+// Bottom total bar
+if(E.length){
+var totalRemaining=total-totalPaidAll;
+if(totalRemaining<0)totalRemaining=0;
+h+='<div style="background:#00d4aa22;border-radius:14px;padding:16px;border:1px solid #00d4aa44;text-align:center">';
+h+='<div style="color:#7d8590;font-size:12px;margin-bottom:4px">Total Monthly Payout</div>';
+h+='<div style="color:#00d4aa;font-size:28px;font-weight:700">₹'+total.toLocaleString('en-IN')+'</div>';
+if(totalPaidAll>0){
+h+='<div style="display:flex;justify-content:center;gap:12px;margin-top:8px;flex-wrap:wrap">';
+h+='<div style="display:inline-flex;align-items:center;gap:4px;padding:4px 12px;border-radius:20px;background:#10b98122;border:1px solid #10b98133"><span style="font-size:12px">✅</span><span style="color:#10b981;font-size:12px;font-weight:700">Paid: ₹'+totalPaidAll.toLocaleString('en-IN')+'</span></div>';
+if(totalRemaining>0)h+='<div style="display:inline-flex;align-items:center;gap:4px;padding:4px 12px;border-radius:20px;background:#fbbf2422;border:1px solid #fbbf2433"><span style="font-size:12px">⏳</span><span style="color:#fbbf24;font-size:12px;font-weight:700">Due: ₹'+totalRemaining.toLocaleString('en-IN')+'</span></div>';
+h+='</div>';}
+h+='</div>';
+}
 }
 
 /* SETTINGS */
