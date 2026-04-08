@@ -188,78 +188,75 @@ h+='<div style="padding:24px 20px;text-align:center"><div style="font-size:40px;
 }else{
 // Show salary info
 h+='<div style="padding:20px">';
-// Salary increment — check if latest increment happened this month (show blinking congrats for full month)
+// === CONGRATULATIONS - Salary Increment (blink full month) ===
 var hist=SALHIST[selE.id]||[];
 if(hist.length>0){var latest=hist[0];
-// Check if increment effective month matches current month — blink for full month
 var nowD=new Date(),curMonLabel=mn[nowD.getMonth()]+' '+nowD.getFullYear();
 var showCongrats=(latest.effectiveMonth===curMonLabel);
-// Also show if increment was created this month (createdAt within this calendar month)
 if(!showCongrats&&latest.createdAt){
-var cDate=latest.createdAt.toDate?latest.createdAt.toDate():new Date(latest.createdAt);
-if(cDate.getMonth()===nowD.getMonth()&&cDate.getFullYear()===nowD.getFullYear())showCongrats=true;
+try{var cDate=latest.createdAt.toDate?latest.createdAt.toDate():new Date(latest.createdAt.seconds?latest.createdAt.seconds*1000:latest.createdAt);
+if(cDate.getMonth()===nowD.getMonth()&&cDate.getFullYear()===nowD.getFullYear())showCongrats=true;}catch(ce){}
 }
-// Always show the increment banner (blinking only if current month)
+if(showCongrats){
 var incAmt=latest.newSalary-latest.oldSalary;
 var incPct=Math.round((incAmt/latest.oldSalary)*100);
-h+='<div style="padding:20px 16px;border-radius:16px;background:linear-gradient(135deg,#fbbf2412,#fbbf2406,#00d4aa08);border:2px solid #fbbf2444;text-align:center;margin-bottom:16px;position:relative;overflow:hidden;'+(showCongrats?'animation:congratsGlow 2s ease-in-out infinite':'')+'">';
-// Confetti emojis floating
-if(showCongrats){
+h+='<div style="padding:20px 16px;border-radius:16px;background:linear-gradient(135deg,#fbbf2412,#fbbf2406,#00d4aa08);border:2px solid #fbbf2444;text-align:center;margin-bottom:16px;position:relative;overflow:hidden;animation:congratsGlow 2s ease-in-out infinite">';
 h+='<div style="position:absolute;top:6px;left:12px;animation:confettiFloat 2.5s ease-in-out infinite;font-size:16px">🎊</div>';
 h+='<div style="position:absolute;top:8px;right:14px;animation:confettiFloat 3s ease-in-out infinite 0.5s;font-size:16px">🎉</div>';
 h+='<div style="position:absolute;top:4px;left:50%;animation:confettiFloat 2s ease-in-out infinite 1s;font-size:14px">✨</div>';
-}
-h+='<div style="font-size:28px;margin-bottom:6px;'+(showCongrats?'animation:starFloat 1.5s ease-in-out infinite':'')+'">🎉</div>';
-h+='<div style="color:#fbbf24;font-size:20px;font-weight:700;letter-spacing:1px;'+(showCongrats?'animation:congratsBlink 1.5s ease-in-out infinite':'')+'">🏆 CONGRATULATIONS! 🏆</div>';
+h+='<div style="font-size:28px;margin-bottom:6px;animation:starFloat 1.5s ease-in-out infinite">🎉</div>';
+h+='<div style="color:#fbbf24;font-size:20px;font-weight:700;letter-spacing:1px;animation:congratsBlink 1.5s ease-in-out infinite">🏆 CONGRATULATIONS! 🏆</div>';
 h+='<div style="color:#e6edf3;font-size:14px;margin-top:8px;line-height:1.6">Your salary has been increased from<br><span style="color:#ff6b6b;font-size:16px;font-weight:600;text-decoration:line-through">₹'+latest.oldSalary.toLocaleString('en-IN')+'</span> <span style="color:#7d8590;font-size:16px">→</span> <span style="color:#10b981;font-size:16px;font-weight:600">₹'+latest.newSalary.toLocaleString('en-IN')+'</span></div>';
-// New salary shown BIG
-h+='<div style="margin-top:12px;padding:14px;background:#10b98115;border-radius:12px;border:1px solid #10b98133;'+(showCongrats?'animation:newSalPop 2s ease-in-out infinite':'')+'"><div style="color:#7d8590;font-size:11px;margin-bottom:4px">NEW SALARY</div><div style="color:#10b981;font-size:40px;font-weight:700;font-family:Playfair Display,serif;letter-spacing:1px">₹'+latest.newSalary.toLocaleString('en-IN')+'</div><div style="color:#10b981;font-size:13px;margin-top:2px">'+(selE.salaryType==='monthly'?'per month':'per day')+'</div></div>';
-// Increment amount badge
+h+='<div style="margin-top:12px;padding:14px;background:#10b98115;border-radius:12px;border:1px solid #10b98133;animation:newSalPop 2s ease-in-out infinite"><div style="color:#7d8590;font-size:11px;margin-bottom:4px">NEW SALARY</div><div style="color:#10b981;font-size:40px;font-weight:700;font-family:Playfair Display,serif;letter-spacing:1px">₹'+latest.newSalary.toLocaleString('en-IN')+'</div><div style="color:#10b981;font-size:13px;margin-top:2px">'+(selE.salaryType==='monthly'?'per month':'per day')+'</div></div>';
 h+='<div style="display:inline-block;margin-top:10px;padding:6px 16px;border-radius:20px;background:#fbbf2422;border:1px solid #fbbf2433"><span style="color:#fbbf24;font-size:13px;font-weight:700">+₹'+incAmt.toLocaleString('en-IN')+' ('+incPct+'% increase)</span></div>';
 h+='<div style="color:#7d8590;font-size:12px;margin-top:8px">Effective from: '+latest.effectiveMonth+'</div>';
 h+='</div>';
 }
-// Current salary card
-h+='<div class="card" style="text-align:center"><div style="color:#7d8590;font-size:12px;margin-bottom:4px">Current Salary</div><div style="color:#00d4aa;font-size:36px;font-weight:700;font-family:Playfair Display,serif">₹'+(selE.salaryType==='monthly'?selE.salary.toLocaleString('en-IN'):selE.dailyRate.toLocaleString('en-IN'))+'</div><div style="color:#7d8590;font-size:12px;margin-top:4px">'+(selE.salaryType==='monthly'?'per month (calculated on 30-day basis)':'per day')+'</div></div>';
-// Salary history
+}
+// === CURRENT SALARY CARD ===
+h+='<div class="card" style="text-align:center"><div style="color:#7d8590;font-size:12px;margin-bottom:4px">Current Salary</div><div style="color:#00d4aa;font-size:36px;font-weight:700;font-family:Playfair Display,serif">₹'+(selE.salaryType==='monthly'?selE.salary.toLocaleString('en-IN'):selE.dailyRate.toLocaleString('en-IN'))+'</div><div style="color:#7d8590;font-size:12px;margin-top:4px">'+(selE.salaryType==='monthly'?'per month (÷30 per day basis)':'per day')+'</div></div>';
+// === PREVIOUS MONTH PAID STATUS (only 1 most recent, use stored paidAmount) ===
+var cm3=new Date().getMonth(),cy3=new Date().getFullYear();
+var prevPaidAdj=null,prevPaidMonth=-1,prevPaidYear=-1;
+for(var pp=1;pp<=3;pp++){var ppM=(cm3-pp+12)%12;var ppY=cm3-pp<0?cy3-1:cy3;var ppK=selE.id+'_'+ppY+'_'+ppM;var ppA=ADJ[ppK]||{};
+if(ppA.paid){prevPaidAdj=ppA;prevPaidMonth=ppM;prevPaidYear=ppY;break;}}
+if(prevPaidAdj){
+// Use stored paidAmount if available, otherwise fallback to recalc
+var mainAmt=parseFloat(prevPaidAdj.paidAmount)||0;
+if(mainAmt===0){var prevSc=calcSal(selE,prevPaidYear,prevPaidMonth);mainAmt=prevSc.net;}
+var prevCoreSal=parseFloat(prevPaidAdj.coreSalary)||0;
+var prevCorePaid=prevPaidAdj.corePaid||false;
+var totalPaid=mainAmt+(prevCorePaid?prevCoreSal:0);
+// Main Paid Status Card (clickable for breakdown)
+h+='<div id="prevPaidCard" class="card" style="border-color:#10b98155;cursor:pointer;transition:all .2s"><div style="display:flex;align-items:center;gap:10px"><div style="width:36px;height:36px;border-radius:50%;background:#10b981;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">✓</div><div style="flex:1"><div style="color:#10b981;font-size:15px;font-weight:700">'+mn[prevPaidMonth]+' '+prevPaidYear+' — Salary Paid</div><div style="color:#e6edf3;font-size:20px;font-weight:700;font-family:Playfair Display,serif;margin-top:2px">₹'+mainAmt.toLocaleString('en-IN')+'</div></div><div style="color:#7d8590;font-size:18px" id="bdArrow">'+(staffSalBdOpen?'▲':'▼')+'</div></div>';
+if(staffSalBdOpen){
+var prevSc2=calcSal(selE,prevPaidYear,prevPaidMonth);
+h+='<div style="margin-top:14px;padding-top:14px;border-top:1px solid #30363d">';
+h+='<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #30363d22"><span style="color:#7d8590;font-size:12px">Base Pay</span><span style="color:#e6edf3;font-size:13px;font-weight:600">₹'+prevSc2.base.toLocaleString('en-IN')+'</span></div>';
+if(prevSc2.overtime>0)h+='<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #30363d22"><span style="color:#7d8590;font-size:12px">Overtime</span><span style="color:#10b981;font-size:13px;font-weight:600">+₹'+prevSc2.overtime.toLocaleString('en-IN')+'</span></div>';
+if(prevSc2.fine>0)h+='<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #30363d22"><span style="color:#7d8590;font-size:12px">Fine</span><span style="color:#ff6b6b;font-size:13px;font-weight:600">-₹'+prevSc2.fine.toLocaleString('en-IN')+'</span></div>';
+h+='<div style="display:flex;justify-content:space-between;padding:6px 0"><span style="color:#7d8590;font-size:12px">Present/Half/Absent</span><span style="color:#e6edf3;font-size:13px">'+prevSc2.present+' / '+prevSc2.half+' / '+prevSc2.absent+'</span></div>';
+h+='</div>';
+}
+h+='</div>';
+// Core Team Extra Salary (1 line, highlighted, for core members)
+if(selE.isCore&&prevCoreSal>0){
+h+='<div style="padding:14px 16px;border-radius:14px;background:#a78bfa15;border:1px solid #a78bfa44;display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><div style="display:flex;align-items:center;gap:8px"><span style="font-size:18px">⭐</span><span style="color:#a78bfa;font-size:14px;font-weight:700">Core Team Extra Salary</span></div><div style="display:flex;align-items:center;gap:8px"><span style="color:#e6edf3;font-size:20px;font-weight:700;font-family:Playfair Display,serif">₹'+prevCoreSal.toLocaleString('en-IN')+'</span><span style="font-size:16px">'+(prevCorePaid?'✅':'⏳')+'</span></div></div>';
+}
+// TOTAL SALARY (main + core)
+if(selE.isCore&&prevCoreSal>0){
+h+='<div style="padding:14px 16px;border-radius:14px;background:linear-gradient(135deg,#10b98115,#a78bfa08);border:2px solid #10b98144;text-align:center;margin-bottom:12px"><div style="color:#7d8590;font-size:11px;margin-bottom:4px">'+mn[prevPaidMonth]+' '+prevPaidYear+' — TOTAL</div><div style="color:#00d4aa;font-size:30px;font-weight:700;font-family:Playfair Display,serif">₹'+totalPaid.toLocaleString('en-IN')+'</div><div style="color:#7d8590;font-size:11px;margin-top:4px">Main ₹'+mainAmt.toLocaleString('en-IN')+' + Core ₹'+prevCoreSal.toLocaleString('en-IN')+'</div></div>';
+}
+}
+// === SALARY HISTORY ===
 if(hist.length>0){
 h+='<div class="card"><h3 style="color:#e6edf3;font-size:14px;margin-bottom:12px">📊 Salary History</h3>';
 for(var sh=0;sh<hist.length;sh++){var hi=hist[sh];
 var hiInc=hi.newSalary-hi.oldSalary;var hiPct=Math.round((hiInc/hi.oldSalary)*100);
 h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;'+(sh<hist.length-1?'border-bottom:1px solid #30363d22':'')+'"><div><div style="color:#e6edf3;font-size:13px;font-weight:600">₹'+hi.oldSalary.toLocaleString('en-IN')+' → ₹'+hi.newSalary.toLocaleString('en-IN')+'</div><div style="color:#7d8590;font-size:11px;margin-top:2px">Effective: '+hi.effectiveMonth+'</div></div><div style="text-align:right"><div style="color:#10b981;font-size:13px;font-weight:700">+₹'+hiInc.toLocaleString('en-IN')+'</div><div style="color:#fbbf24;font-size:10px">+'+hiPct+'%</div></div></div>';}
 h+='</div>';}
-// Set/change salary password
+// === PASSWORD (at very bottom) ===
 h+='<div class="card"><h3 style="color:#e6edf3;font-size:14px;margin-bottom:12px">🔐 Salary Password</h3><p style="color:#7d8590;font-size:11px;margin-bottom:8px">'+(salPwd?'Password set ache — change korte parben':'Password set korle onno keu dekhte parbe na')+'</p><input id="newSalPwd" type="password" placeholder="'+(salPwd?'New password':'Set password')+'"><button id="setSalPwd" class="btn bp">Save Password 🔐</button></div>';
-// === PREVIOUS MONTH PAID STATUS (only 1 most recent) ===
-var cm3=new Date().getMonth(),cy3=new Date().getFullYear();
-var prevPaidAdj=null,prevPaidMonth=-1,prevPaidYear=-1;
-for(var pp=1;pp<=3;pp++){var ppM=(cm3-pp+12)%12;var ppY=cm3-pp<0?cy3-1:cy3;var ppK=selE.id+'_'+ppY+'_'+ppM;var ppA=ADJ[ppK]||{};
-if(ppA.paid){prevPaidAdj=ppA;prevPaidMonth=ppM;prevPaidYear=ppY;break;}}
-if(prevPaidAdj){
-var prevSc=calcSal(selE,prevPaidYear,prevPaidMonth);
-var prevCoreSal=parseFloat(prevPaidAdj.coreSalary)||0;
-var prevCorePaid=prevPaidAdj.corePaid||false;
-var mainAmt=prevSc.net;
-var totalPaid=mainAmt+(prevCorePaid?prevCoreSal:0);
-h+='<div id="prevPaidCard" class="card" style="border-color:#10b98155;cursor:pointer;transition:all .2s"><div style="display:flex;align-items:center;gap:10px"><div style="width:36px;height:36px;border-radius:50%;background:#10b981;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">✓</div><div style="flex:1"><div style="color:#10b981;font-size:15px;font-weight:700">'+mn[prevPaidMonth]+' '+prevPaidYear+' — Salary Paid</div><div style="color:#e6edf3;font-size:22px;font-weight:700;font-family:Playfair Display,serif;margin-top:2px">₹'+totalPaid.toLocaleString('en-IN')+'</div></div><div style="color:#7d8590;font-size:18px" id="bdArrow">'+(staffSalBdOpen?'▲':'▼')+'</div></div>';
-// Clickable breakdown (toggle)
-if(staffSalBdOpen){
-h+='<div style="margin-top:14px;padding-top:14px;border-top:1px solid #30363d">';
-h+='<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #30363d22"><span style="color:#7d8590;font-size:12px">Base Pay</span><span style="color:#e6edf3;font-size:13px;font-weight:600">₹'+prevSc.base.toLocaleString('en-IN')+'</span></div>';
-if(prevSc.overtime>0)h+='<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #30363d22"><span style="color:#7d8590;font-size:12px">Overtime'+(prevSc.otPaid?' (Separate)':'')+'</span><span style="color:#10b981;font-size:13px;font-weight:600">+₹'+prevSc.overtime.toLocaleString('en-IN')+'</span></div>';
-if(prevSc.fine>0)h+='<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #30363d22"><span style="color:#7d8590;font-size:12px">Fine</span><span style="color:#ff6b6b;font-size:13px;font-weight:600">-₹'+prevSc.fine.toLocaleString('en-IN')+'</span></div>';
-h+='<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #30363d22"><span style="color:#7d8590;font-size:12px">Present / Half / Absent</span><span style="color:#e6edf3;font-size:13px">'+prevSc.present+' / '+prevSc.half+' / '+prevSc.absent+'</span></div>';
-h+='<div style="display:flex;justify-content:space-between;padding:8px 0"><span style="color:#10b981;font-size:13px;font-weight:700">Main Salary Net</span><span style="color:#10b981;font-size:15px;font-weight:700">₹'+mainAmt.toLocaleString('en-IN')+'</span></div>';
-h+='</div>';
-}
-h+='</div>';
-// Core Team Extra Salary (for core members only)
-if(selE.isCore&&prevCoreSal>0){
-h+='<div class="card" style="border-color:#a78bfa55;'+(prevCorePaid?'':'animation:corePulse 2s ease-in-out infinite')+'"><div style="display:flex;align-items:center;gap:10px"><div style="width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,#a78bfa,#7c3aed);display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0">⭐</div><div style="flex:1"><div style="color:#a78bfa;font-size:14px;font-weight:700">Core Team Extra Salary</div><div style="color:#e6edf3;font-size:24px;font-weight:700;font-family:Playfair Display,serif;margin-top:2px">₹'+prevCoreSal.toLocaleString('en-IN')+'</div><div style="color:#7d8590;font-size:11px;margin-top:2px">'+mn[prevPaidMonth]+' '+prevPaidYear+'</div></div><div style="font-size:22px">'+(prevCorePaid?'✅':'⏳')+'</div></div></div>';
-// GRAND TOTAL
-h+='<div style="padding:16px;border-radius:14px;background:linear-gradient(135deg,#10b98115,#a78bfa10);border:2px solid #10b98144;text-align:center;margin-bottom:12px"><div style="color:#7d8590;font-size:12px;margin-bottom:4px">'+mn[prevPaidMonth]+' '+prevPaidYear+' — TOTAL SALARY</div><div style="color:#00d4aa;font-size:32px;font-weight:700;font-family:Playfair Display,serif">₹'+totalPaid.toLocaleString('en-IN')+'</div><div style="display:flex;justify-content:center;gap:16px;margin-top:8px"><div><div style="color:#10b981;font-size:12px">Main</div><div style="color:#e6edf3;font-size:14px;font-weight:700">₹'+mainAmt.toLocaleString('en-IN')+'</div></div><div style="color:#30363d">+</div><div><div style="color:#a78bfa;font-size:12px">Core Extra</div><div style="color:#e6edf3;font-size:14px;font-weight:700">₹'+prevCoreSal.toLocaleString('en-IN')+'</div></div></div><div style="margin-top:8px"><span style="display:inline-block;padding:4px 14px;border-radius:20px;font-size:11px;font-weight:700;'+(prevCorePaid&&prevPaidAdj.paid?'background:#10b98122;color:#10b981':'background:#fbbf2422;color:#fbbf24')+'">'+((prevCorePaid&&prevPaidAdj.paid)?'✅ All Paid':'⏳ Partially Paid')+'</span></div></div>';
-}
-}
 h+='</div>';
 }
 }else{
@@ -362,19 +359,16 @@ loadLateAllows(function(){loadRecsMonth(new Date().getFullYear(),new Date().getM
 function calcSal(e,y,m){
 var totalDays=dim(y,m);
 var pr2=0,hf2=0,ab2=0,sun=csun(y,m),td=new Date();
-// Count Sundays till today for paid leave (monthly staff only)
 var paidSundays=0;
 for(var d=1;d<=totalDays;d++){
 var isToday=new Date(y,m,d)<=td;
 if(new Date(y,m,d).getDay()===0){
-// Monthly staff get Sunday as paid leave
 if(e.salaryType==='monthly'&&isToday)paidSundays++;
 continue;
 }
 var dt=y+'-'+String(m+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');
 var rec2=R[e.id+'_'+dt];
 if(rec2){if(rec2.status==='present'){
-// Check early leave hours
 if(rec2.earlyHrs){var worked=8-rec2.earlyHrs;pr2+=Math.max(0,Math.round((worked/8)*100)/100);}
 else pr2++;
 }else if(rec2.status==='half')hf2++;else if(rec2.status==='early'){hf2++;}else ab2++;}
@@ -385,15 +379,37 @@ var adj=ADJ[adjKey]||{overtime:0,fine:0};
 var ot=parseFloat(adj.overtime)||0;
 var fine=parseFloat(adj.fine)||0;
 var otPaid=adj.otPaid||false;
-// Monthly: effective = present + half*0.5 + paid sundays
-// Daily: effective = present + half*0.5 (no sunday pay)
 var eff=pr2+hf2*0.5;
 var effWithSun=eff+paidSundays;
-// ALWAYS use 30-day ratio for monthly staff, regardless of actual days in month
-// Cap effective days at 30 so salary never exceeds base monthly salary
-var cappedEff=e.salaryType==='monthly'?Math.min(effWithSun,30):eff;
-var base=e.salaryType==='monthly'?Math.round((e.salary/30)*cappedEff):Math.round(e.dailyRate*eff);
-// If OT paid separately, don't add to net salary
+// MONTHLY STAFF: Full salary minus deductions for absent/half days
+// perDay = salary / 30 (always 30, regardless of month length)
+// absentDeduction = (absent + half*0.5) * perDay
+// base = salary - absentDeduction
+// DAILY STAFF: dailyRate * effective days (unchanged)
+var base;
+if(e.salaryType==='monthly'){
+var perDay=e.salary/30;
+var absentDeduction=(ab2+hf2*0.5)*perDay;
+// Also deduct early leave fractional days from present
+var earlyDeduction=(pr2-Math.floor(pr2))<0?0:0;
+// pr2 already has fractional counted (e.g. 0.75 for 6hr work), so missed part = count of present days minus pr2
+// Actually pr2 already accounts for early leave. absentDays = ab2, halfDays reduce by 0.5
+// Simple: deduction = absent*perDay + half*0.5*perDay + earlyLeave fractional
+// But pr2 already has early leave factored as fraction. Let's use: base = salary - (ab2 + hf2*0.5)*perDay - earlyLeaveFraction
+// Easier approach: count total unpaid days
+// totalWorkDays (non-Sunday) = totalDays - sun
+// workedEquivalent = pr2 + hf2*0.5  (pr2 already has early leave fraction)
+// missedDays = totalWorkDays counted so far (excluding future) - workedEquivalent
+// But for simplicity matching user's formula: salary - absent_days * perDay
+// absent_days includes full absents + half*0.5, early leave fractions already reduce pr2
+var totalCountedWorkDays=pr2+hf2+ab2; // all non-Sunday days counted so far
+var unpaidDays=totalCountedWorkDays-eff; // eff = pr2 + hf2*0.5, so unpaid = ab2 + hf2*0.5 + (full presents - fractional presents from early leave)
+base=Math.round(e.salary-unpaidDays*perDay);
+if(base>e.salary)base=e.salary;
+if(base<0)base=0;
+}else{
+base=Math.round(e.dailyRate*eff);
+}
 var netOt=otPaid?0:ot;
 var net=base+netOt-fine;
 return {present:pr2,half:hf2,absent:ab2,effective:eff,effWithSun:effWithSun,paidSundays:paidSundays,base:base,overtime:ot,otPaid:otPaid,fine:fine,net:Math.max(0,net),sundays:sun,totalDays:totalDays};
@@ -698,8 +714,12 @@ var eid=this.getAttribute('data-eid');
 var adjKey=eid+'_'+salY+'_'+salM;
 var existing=ADJ[adjKey]||{};
 var newPaid=!existing.paid;
-var data={empId:eid,year:String(salY),month:String(salM+1).padStart(2,'0'),overtime:existing.overtime||0,fine:existing.fine||0,paid:newPaid,paidDate:newPaid?fd():'',otPaid:existing.otPaid||false,otPaidDate:existing.otPaidDate||''};
-if(existing._id){adjRef.doc(existing._id).update({paid:newPaid,paidDate:data.paidDate}).then(function(){existing.paid=newPaid;existing.paidDate=data.paidDate;showToast(newPaid?'✅ Salary Paid!':'↩️ Undone!');render();});}
+// Calculate and store the paid amount so staff view shows correct amount
+var paidAmt=0;
+if(newPaid){var emp3=null;for(var j=0;j<E.length;j++)if(E[j].id===eid){emp3=E[j];break;}
+if(emp3){var sc3=calcSal(emp3,salY,salM);paidAmt=sc3.net;}}
+var data={empId:eid,year:String(salY),month:String(salM+1).padStart(2,'0'),overtime:existing.overtime||0,fine:existing.fine||0,paid:newPaid,paidDate:newPaid?fd():'',paidAmount:newPaid?paidAmt:0,otPaid:existing.otPaid||false,otPaidDate:existing.otPaidDate||''};
+if(existing._id){adjRef.doc(existing._id).update({paid:newPaid,paidDate:data.paidDate,paidAmount:data.paidAmount}).then(function(){existing.paid=newPaid;existing.paidDate=data.paidDate;existing.paidAmount=data.paidAmount;showToast(newPaid?'✅ Salary Paid!':'↩️ Undone!');render();});}
 else{adjRef.add(data).then(function(doc){data._id=doc.id;ADJ[adjKey]=data;showToast('✅ Salary Paid!');render();});}
 };
 
@@ -734,9 +754,11 @@ slip+='║ Present       : '+sc.present+'                     \n';
 slip+='║ Half Day      : '+sc.half+'                      \n';
 slip+='║ Absent        : '+sc.absent+'                     \n';
 if(emp.salaryType==='monthly')slip+='║ Paid Sundays  : '+sc.paidSundays+'                     \n';
-slip+='║ Effective Days: '+(emp.salaryType==='monthly'?Math.min(sc.effWithSun,30):sc.effective)+'                   \n';
+slip+='║ Effective Days: '+(emp.salaryType==='monthly'?sc.effective:sc.effective)+'                   \n';
 slip+='╠══════════════════════════════════════╣\n';
-slip+='║ '+(emp.salaryType==='monthly'?'Monthly Salary : ₹'+emp.salary+' (÷30 always)':'Daily Rate     : ₹'+emp.dailyRate)+'\n';
+slip+='║ '+(emp.salaryType==='monthly'?'Monthly Salary : ₹'+emp.salary+' (÷30 per day)':'Daily Rate     : ₹'+emp.dailyRate)+'\n';
+if(emp.salaryType==='monthly'){var perD=Math.round(emp.salary/30);slip+='║ Per Day Rate   : ₹'+perD+' (salary÷30)        \n';
+slip+='║ Absent Deduct  : '+sc.absent+' days × ₹'+perD+'           \n';}
 slip+='║ Base Pay      : ₹'+sc.base.toLocaleString('en-IN')+'              \n';
 slip+='║ Overtime (+)  : ₹'+sc.overtime.toLocaleString('en-IN')+'              \n';
 slip+='║ Fine (-)      : ₹'+sc.fine.toLocaleString('en-IN')+'              \n';
