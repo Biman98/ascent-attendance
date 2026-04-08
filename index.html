@@ -855,69 +855,49 @@ var emp=null;for(var i=0;i<E.length;i++)if(E[i].id===eid){emp=E[i];break;}
 if(!emp)return;
 var area=document.getElementById('eFA');if(!area)return;
 var curSal=emp.salaryType==='monthly'?emp.salary:emp.dailyRate;
-// Load salary history first to show existing increments
-salHistRef.where('empId','==',eid).get().then(function(snap){
-var histArr=[];snap.forEach(function(d){histArr.push(Object.assign({_id:d.id},d.data()));});
-histArr.sort(function(a,b){var ta=a.createdAt?((typeof a.createdAt.toDate==='function')?a.createdAt.toDate().getTime():((a.createdAt.seconds||0)*1000)):0;var tb=b.createdAt?((typeof b.createdAt.toDate==='function')?b.createdAt.toDate().getTime():((b.createdAt.seconds||0)*1000)):0;return tb-ta;});
-SALHIST[eid]=histArr;
-
-// Build month options — current month onwards (no past months to prevent confusion)
 var nowD=new Date();
+
+// Build month options
 var effOpts='';
 for(var futM=0;futM<18;futM++){
 var mIdx=(nowD.getMonth()+futM)%12;
 var yVal=nowD.getFullYear()+Math.floor((nowD.getMonth()+futM)/12);
 var label=mn[mIdx]+' '+yVal;
-var isCurMonth=(futM===0);
-effOpts+='<option value="'+label+'"'+(isCurMonth?' selected':'')+'>'+label+(isCurMonth?' (current)':'')+'</option>';
+effOpts+='<option value="'+label+'"'+(futM===0?' selected':'')+'>'+label+(futM===0?' (current)':'')+'</option>';
 }
 
+// Render form IMMEDIATELY (no waiting for Firestore)
 var h='<div style="border-radius:16px;border:2px solid #00d4aa44;background:#161b22;overflow:hidden;margin-bottom:16px">';
-// Header
 h+='<div style="padding:16px 18px;background:linear-gradient(135deg,#00d4aa15,#00d4aa08);border-bottom:1px solid #00d4aa33">';
 h+='<div style="display:flex;align-items:center;gap:10px"><span style="font-size:24px">📈</span><div><div style="color:#00d4aa;font-size:16px;font-weight:700">Salary Increment</div><div style="color:#e6edf3;font-size:14px;font-weight:600;margin-top:2px">'+emp.name+'</div></div></div>';
 h+='</div>';
-// Body
 h+='<div style="padding:18px">';
-// Current salary display
+// Current salary
 h+='<div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-radius:12px;background:#0c1117;border:1px solid #30363d;margin-bottom:16px">';
 h+='<div><div style="color:#7d8590;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Current Salary</div><div style="color:#e6edf3;font-size:22px;font-weight:700;font-family:Playfair Display,serif;margin-top:2px">₹'+curSal.toLocaleString('en-IN')+'</div></div>';
 h+='<div style="color:#7d8590;font-size:12px;text-align:right">'+(emp.salaryType==='monthly'?'per month':'per day')+'</div>';
 h+='</div>';
-// New salary input
+// New salary
 h+='<label style="color:#7d8590;font-size:12px;font-weight:600;display:block;margin-bottom:6px">New Salary (₹)</label>';
 h+='<input id="incNewSal" type="number" placeholder="e.g. '+(curSal+Math.round(curSal*0.1))+'" style="font-size:18px;font-weight:600;padding:14px 16px;margin-bottom:14px">';
-// Effective from selector
+// Effective from
 h+='<label style="color:#7d8590;font-size:12px;font-weight:600;display:block;margin-bottom:6px">Effective From</label>';
 h+='<select id="incEffMonth" style="font-size:15px;padding:14px 16px;margin-bottom:8px">'+effOpts+'</select>';
-// Info box
+// Info
 h+='<div style="padding:10px 14px;border-radius:10px;background:#fbbf2410;border:1px solid #fbbf2422;margin-bottom:16px">';
 h+='<div style="color:#fbbf24;font-size:11px;line-height:1.6">💡 <strong>Note:</strong> New salary only applies from the selected month onwards. Previous months will keep their original salary — no effect on past calculations.</div>';
 h+='</div>';
-// Preview (will update dynamically)
+// Preview
 h+='<div id="incPreview" style="margin-bottom:16px"></div>';
 // Buttons
 h+='<div style="display:flex;gap:10px"><button id="incSave" class="btn bp" style="font-size:15px;padding:16px">Save Increment 📈</button><button id="incCancel" class="btn bs" style="width:auto;padding:16px 24px;font-size:14px">Cancel</button></div>';
 h+='</div>';
-// Existing History
-if(histArr.length>0){
-h+='<div style="padding:0 18px 18px"><div style="color:#7d8590;font-size:12px;font-weight:600;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px">Increment History</div>';
-for(var si=0;si<histArr.length;si++){var hi=histArr[si];
-var incAmt=hi.newSalary-hi.oldSalary;var incPct=hi.oldSalary>0?Math.round((incAmt/hi.oldSalary)*100):0;
-h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;border-radius:10px;background:#0c1117;margin-bottom:6px;border:1px solid #30363d">';
-h+='<div><div style="color:#e6edf3;font-size:13px;font-weight:600">₹'+hi.oldSalary.toLocaleString('en-IN')+' → ₹'+hi.newSalary.toLocaleString('en-IN')+'</div>';
-h+='<div style="color:#7d8590;font-size:11px;margin-top:2px">Effective: '+hi.effectiveMonth+'</div></div>';
-h+='<div style="text-align:right"><div style="color:#10b981;font-size:13px;font-weight:700">+₹'+incAmt.toLocaleString('en-IN')+'</div>';
-h+='<div style="color:#fbbf24;font-size:10px">+'+incPct+'%</div></div>';
-h+='<button data-hid="'+hi._id+'" data-eid="'+eid+'" data-old="'+hi.oldSalary+'" class="delHist" style="background:none;border:none;font-size:14px;cursor:pointer;margin-left:6px" title="Delete this record">🗑️</button>';
-h+='</div>';
-}
-h+='</div>';
-}
+// History placeholder (loaded async)
+h+='<div id="incHistArea" style="padding:0 18px 18px"><div style="text-align:center;color:#7d8590;font-size:12px;padding:8px">Loading history...</div></div>';
 h+='</div>';
 area.innerHTML=h;
 
-// Preview update function
+// Bind preview
 function updatePreview(){
 var newSal=parseFloat(document.getElementById('incNewSal').value)||0;
 var prevEl=document.getElementById('incPreview');
@@ -933,31 +913,27 @@ prevEl.innerHTML='<div style="padding:14px 16px;border-radius:12px;background:li
 '<div style="text-align:right"><div style="padding:6px 12px;border-radius:20px;background:#10b98122;color:#10b981;font-size:14px;font-weight:700">+₹'+diff.toLocaleString('en-IN')+'</div>'+
 '<div style="color:#fbbf24;font-size:11px;margin-top:4px">+'+pct+'% increase</div></div></div></div>';
 }
-document.getElementById('incNewSal').addEventListener('input',updatePreview);
-document.getElementById('incEffMonth').addEventListener('change',updatePreview);
+var incNewEl=document.getElementById('incNewSal');if(incNewEl)incNewEl.addEventListener('input',updatePreview);
+var incEffEl=document.getElementById('incEffMonth');if(incEffEl)incEffEl.addEventListener('change',updatePreview);
 
-// Save handler
+// Bind save
 document.getElementById('incSave').onclick=function(){
 var newSal=parseFloat(document.getElementById('incNewSal').value)||0;
 var effMonth=document.getElementById('incEffMonth').value;
 if(newSal<=0)return showToast('❌ New salary likhun!');
 if(newSal<=curSal)return showToast('❌ New salary must be higher than current ₹'+curSal.toLocaleString('en-IN')+'!');
-// Parse effective month to check if it applies now
 var effParts=effMonth.trim().split(' ');
-var effMIdx=mn.indexOf(effParts[0]);
-var effYVal=parseInt(effParts[effParts.length-1]);
+var effMIdx2=mn.indexOf(effParts[0]);
+var effYVal2=parseInt(effParts[effParts.length-1]);
 var histData={empId:eid,empName:emp.name,oldSalary:curSal,newSalary:newSal,effectiveMonth:effMonth,createdAt:firebase.firestore.FieldValue.serverTimestamp()};
 showToast('💾 Saving...');
 salHistRef.add(histData).then(function(doc){
 histData._id=doc.id;
-_salHistLoaded=false; // force reload on next salary page visit
-// Update SALHIST cache
-histArr.unshift(histData);
-SALHIST[eid]=histArr;
-// Only update the employee base salary field if effective month <= current month
-// This ensures getSalForMonth works correctly for all months
+_salHistLoaded=false;
+if(!SALHIST[eid])SALHIST[eid]=[];
+SALHIST[eid].unshift(histData);
 var nowMonth=nowD.getMonth();var nowYear=nowD.getFullYear();
-var effAppliesNow=(effYVal<nowYear)||(effYVal===nowYear&&effMIdx<=nowMonth);
+var effAppliesNow=(effYVal2<nowYear)||(effYVal2===nowYear&&effMIdx2<=nowMonth);
 if(effAppliesNow){
 var upd=emp.salaryType==='monthly'?{salary:newSal}:{dailyRate:newSal};
 empRef.doc(eid).update(upd).then(function(){
@@ -966,50 +942,75 @@ showToast('📈 Salary updated: ₹'+newSal.toLocaleString('en-IN')+' (effective
 area.innerHTML='';render();
 });
 }else{
-// Future effective — don't change current salary field
 showToast('📈 Increment saved! Will apply from '+effMonth);
 area.innerHTML='';render();
 }
-}).catch(function(err){showToast('❌ Error: '+(err.message||'Save failed'));});
+}).catch(function(err){showToast('❌ Save error: '+(err.message||'Try again'));});
 };
-// Cancel handler
+// Bind cancel
 document.getElementById('incCancel').onclick=function(){area.innerHTML='';};
-// Delete history record handler
-var delBtns=document.querySelectorAll('.delHist');
+
+// Load history in background (non-blocking)
+try{
+salHistRef.where('empId','==',eid).get().then(function(snap){
+var histArr=[];snap.forEach(function(d){histArr.push(Object.assign({_id:d.id},d.data()));});
+histArr.sort(function(a,b){
+var ta=a.createdAt?((typeof a.createdAt.toDate==='function')?a.createdAt.toDate().getTime():((a.createdAt.seconds||0)*1000)):0;
+var tb=b.createdAt?((typeof b.createdAt.toDate==='function')?b.createdAt.toDate().getTime():((b.createdAt.seconds||0)*1000)):0;
+return tb-ta;});
+SALHIST[eid]=histArr;
+// Render history into placeholder
+var hArea=document.getElementById('incHistArea');
+if(!hArea)return;
+if(histArr.length===0){hArea.innerHTML='<div style="text-align:center;color:#7d8590;font-size:12px;padding:8px">No previous increments</div>';return;}
+var hh='<div style="color:#7d8590;font-size:12px;font-weight:600;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px">Increment History</div>';
+for(var si=0;si<histArr.length;si++){var hi=histArr[si];
+var incAmt=hi.newSalary-hi.oldSalary;var incPct=hi.oldSalary>0?Math.round((incAmt/hi.oldSalary)*100):0;
+hh+='<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;border-radius:10px;background:#0c1117;margin-bottom:6px;border:1px solid #30363d">';
+hh+='<div><div style="color:#e6edf3;font-size:13px;font-weight:600">₹'+hi.oldSalary.toLocaleString('en-IN')+' → ₹'+hi.newSalary.toLocaleString('en-IN')+'</div>';
+hh+='<div style="color:#7d8590;font-size:11px;margin-top:2px">Effective: '+hi.effectiveMonth+'</div></div>';
+hh+='<div style="text-align:right"><div style="color:#10b981;font-size:13px;font-weight:700">+₹'+incAmt.toLocaleString('en-IN')+'</div>';
+hh+='<div style="color:#fbbf24;font-size:10px">+'+incPct+'%</div></div>';
+hh+='<button data-hid="'+hi._id+'" data-eid="'+eid+'" data-old="'+hi.oldSalary+'" class="delHist" style="background:none;border:none;font-size:14px;cursor:pointer;margin-left:6px" title="Delete">🗑️</button>';
+hh+='</div>';}
+hArea.innerHTML=hh;
+// Bind delete buttons
+var delBtns=hArea.querySelectorAll('.delHist');
 for(var dh=0;dh<delBtns.length;dh++)delBtns[dh].onclick=function(){
 var hid=this.getAttribute('data-hid');
 var dEid=this.getAttribute('data-eid');
 var oldSalVal=parseFloat(this.getAttribute('data-old'));
 if(!confirm('Ei increment record delete korben?'))return;
 salHistRef.doc(hid).delete().then(function(){
-_salHistLoaded=false; // force reload on next salary page visit
-// Remove from cache
-var hArr=SALHIST[dEid]||[];
-SALHIST[dEid]=hArr.filter(function(x){return x._id!==hid;});
-// If we deleted the latest increment, revert employee salary to the appropriate value
+_salHistLoaded=false;
+var hArr2=SALHIST[dEid]||[];
+SALHIST[dEid]=hArr2.filter(function(x){return x._id!==hid;});
 var remaining=SALHIST[dEid];
 if(remaining.length===0){
-// Revert to oldSalary of deleted record
 var revertUpd=emp.salaryType==='monthly'?{salary:oldSalVal}:{dailyRate:oldSalVal};
 empRef.doc(dEid).update(revertUpd).then(function(){
 if(emp.salaryType==='monthly')emp.salary=oldSalVal;else emp.dailyRate=oldSalVal;
 showToast('🗑️ Deleted & reverted to ₹'+oldSalVal.toLocaleString('en-IN'));
-showIncForm(dEid);
-});
+showIncForm(dEid);});
 }else{
-// Find what the current salary should be now
 var nowM2=new Date().getMonth(),nowY2=new Date().getFullYear();
 var correctSal=getSalForMonth(emp,nowY2,nowM2);
 var revertUpd2=emp.salaryType==='monthly'?{salary:correctSal}:{dailyRate:correctSal};
 empRef.doc(dEid).update(revertUpd2).then(function(){
 if(emp.salaryType==='monthly')emp.salary=correctSal;else emp.dailyRate=correctSal;
-showToast('🗑️ Deleted! Current salary: ₹'+correctSal.toLocaleString('en-IN'));
-showIncForm(dEid);
-});
+showToast('🗑️ Deleted! Salary: ₹'+correctSal.toLocaleString('en-IN'));
+showIncForm(dEid);});
 }
 }).catch(function(){showToast('❌ Delete failed!');});
 };
-}).catch(function(err){showToast('❌ Load error: '+(err.message||'Try again'));console.error('SalHist load error:',err);});
+}).catch(function(err){
+var hArea=document.getElementById('incHistArea');
+if(hArea)hArea.innerHTML='<div style="text-align:center;color:#7d8590;font-size:11px;padding:8px">History not available</div>';
+});
+}catch(e){
+var hArea=document.getElementById('incHistArea');
+if(hArea)hArea.innerHTML='';
+}
 }
 
 /* ===== EMPLOYEE FORM ===== */
