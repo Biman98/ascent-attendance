@@ -51,6 +51,8 @@ select{-webkit-appearance:auto;appearance:auto}
 
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 
 <script>
 (function(){
@@ -73,9 +75,43 @@ var recRef=db.collection('attendance');
 var setRef=db.collection('settings').doc('main');
 var adjRef=db.collection('adjustments');
 var salHistRef=db.collection('salaryHistory');
+var agrRef=db.collection('agreements');
+var kycRef=db.collection('kyc');
+var storage=null;try{storage=firebase.storage();}catch(e){storage=null;}
+try{firebase.auth().signInAnonymously().catch(function(){});}catch(e){}
 
 var E=[],R={},S={lat:22.5726,lng:88.3639,radius:200,adminPwd:'ascent2026'},ADJ={},LATE={},SALHIST={};
+var AGR={},KYC={}; /* AGR[empId]=signed record, KYC[empId]={aadhaar,bank} */
 var loaded=false;
+
+/* ===== AGREEMENT TEMPLATES (Bengali, admin-editable) ===== */
+function genTemplate(roleTitle,dutyLine){
+return 'Ascent Digital Creation — '+roleTitle+' চুক্তি ও সম্মতিপত্র\n\n'+
+'আমি স্বেচ্ছায় ও সজ্ঞানে Ascent Digital Creation-এর সাথে কর্মী হিসেবে যুক্ত হতে সম্মত হচ্ছি এবং নিম্নলিখিত শর্তাবলী মেনে চলতে রাজি আছি:\n\n'+
+'১. আমি আমার দায়িত্ব সততা, পেশাদারিত্ব ও নিষ্ঠার সাথে পালন করব।\n'+
+(dutyLine?('২. '+dutyLine+'\n'):'')+
+(dutyLine?'৩. ':'২. ')+'কোম্পানির কনটেন্ট, স্ক্রিপ্ট, পরিকল্পনা, লোগো, পেজ ও অন্যান্য সমস্ত উপকরণ কোম্পানির নিজস্ব সম্পত্তি; আমি এগুলি বাইরে শেয়ার, বিক্রি বা ব্যক্তিগত কাজে ব্যবহার করব না।\n'+
+(dutyLine?'৪. ':'৩. ')+'চাকরিরত অবস্থায় আমি প্রতিযোগী কোনো পেজ/চ্যানেল/ব্যক্তির জন্য একই ধরনের কাজ করব না।\n'+
+(dutyLine?'৫. ':'৪. ')+'কর্মক্ষেত্রে সকল সহকর্মীর প্রতি সম্মানজনক আচরণ করব; কোনো প্রকার হয়রানি বা অসদাচরণ করব না।\n'+
+(dutyLine?'৬. ':'৫. ')+'কাজ ছাড়তে চাইলে কমপক্ষে ১৫ দিন আগে লিখিতভাবে জানাব এবং চলমান কাজ বুঝিয়ে দেব।\n'+
+(dutyLine?'৭. ':'৬. ')+'আমার দেওয়া পরিচয়পত্র (আধার) ও ব্যাঙ্ক তথ্য সঠিক, এবং কেবলমাত্র বেতন ও কর্মী-নথির উদ্দেশ্যে কোম্পানি তা সংরক্ষণ করবে — এতে আমার সম্পূর্ণ সম্মতি আছে।\n\n'+
+'আমি নিশ্চিত করছি যে উপরের শর্তাবলী পড়েছি ও বুঝেছি। Information Technology Act, 2000 অনুযায়ী এই ইলেকট্রনিক সম্মতি ও স্বাক্ষর আইনত বৈধ বলে আমি স্বীকার করছি।';
+}
+var DEFAULT_AGR={
+editor:genTemplate('ভিডিও এডিটর','আমি সময়মতো ও এডিট-ব্রিফ অনুযায়ী ভিডিও ডেলিভার করব এবং কাঁচা ফুটেজ ও প্রজেক্ট ফাইল গোপন রাখব।'),
+actor:genTemplate('অভিনেতা/অভিনেত্রী','আমি শুটিং শিডিউল মেনে চলব এবং কোম্পানির কনটেন্টে আমার অভিনয় ব্যবহারের পূর্ণ অধিকার কোম্পানিকে দেব।'),
+dop:genTemplate('DOP / ক্যামেরা','আমি শুটিং সরঞ্জাম যত্নসহকারে ব্যবহার করব এবং ধারণকৃত সমস্ত ফুটেজ কোম্পানির সম্পত্তি হিসেবে রাখব।'),
+other:genTemplate('কর্মী','')
+};
+function getRoleTemplate(role){
+var t=S.agreementTemplates||{};
+if(t[role]&&t[role].trim())return t[role];
+if(t.other&&t.other.trim())return t.other;
+return DEFAULT_AGR[role]||DEFAULT_AGR.other;
+}
+function roleLabel(r){return r==='editor'?'ভিডিও এডিটর':r==='actor'?'অভিনেতা/অভিনেত্রী':r==='dop'?'DOP / ক্যামেরা':'কর্মী';}
+function simpleHash(str){var h=5381;for(var i=0;i<str.length;i++){h=((h<<5)+h)+str.charCodeAt(i);h=h&0xffffffff;}return (h>>>0).toString(16);}
+function escHtml(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 
 function fd(d){d=d||new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
 function dim(y,m){return new Date(y,m+1,0).getDate();}
@@ -89,9 +125,10 @@ var mn=['January','February','March','April','May','June','July','August','Septe
 function loadAll(cb){
 var done=0;function chk(){done++;if(done>=4){loaded=true;if(cb)cb();}}
 empRef.orderBy('name').get().then(function(s){E=[];s.forEach(function(d){var o=d.data();o.id=d.id;E.push(o);});chk();}).catch(function(){chk();});
-setRef.get().then(function(d){if(d.exists){var o=d.data();S.lat=o.lat||S.lat;S.lng=o.lng||S.lng;S.radius=o.radius||S.radius;S.adminPwd=o.adminPwd||S.adminPwd;if(o.cutoffHr!==undefined)S.cutoffHr=o.cutoffHr;if(o.cutoffMin!==undefined)S.cutoffMin=o.cutoffMin;}chk();}).catch(function(){chk();});
+setRef.get().then(function(d){if(d.exists){var o=d.data();S.lat=o.lat||S.lat;S.lng=o.lng||S.lng;S.radius=o.radius||S.radius;S.adminPwd=o.adminPwd||S.adminPwd;if(o.cutoffHr!==undefined)S.cutoffHr=o.cutoffHr;if(o.cutoffMin!==undefined)S.cutoffMin=o.cutoffMin;if(o.agreementTemplates)S.agreementTemplates=o.agreementTemplates;if(o.coc)S.coc=o.coc;}chk();}).catch(function(){chk();});
 recRef.where('date','==',fd()).get().then(function(s){s.forEach(function(d){var o=d.data();o._id=d.id;R[o.empId+'_'+o.date]=o;});chk();}).catch(function(){chk();});
 loadLateAllows(chk);
+setTimeout(function(){if(!loaded){loaded=true;if(cb)cb();else render();}},6000);
 }
 
 function loadLateAllows(cb){
@@ -191,9 +228,11 @@ for(var n=0;n<nums.length;n++){if(nums[n]==='')h+='<div></div>';else h+='<button
 h+='</div><button id="vBtn" class="btn bp" style="margin-top:20px;opacity:'+(pin.length===4?1:.5)+'">Login →</button></div>';
 }else if(sStep==='mark'||sStep==='salary'){
 // Tab navigation
-h+='<div style="display:flex;gap:8px;padding:12px 20px"><button id="staffAttTab" style="flex:1;padding:10px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:600;border:1px solid '+(staffTab==='att'?'#00d4aa':'#30363d')+';background:'+(staffTab==='att'?'#00d4aa22':'transparent')+';color:'+(staffTab==='att'?'#00d4aa':'#7d8590')+';font-family:inherit">📋 Attendance</button><button id="staffSalTab" style="flex:1;padding:10px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:600;border:1px solid '+(staffTab==='salary'?'#00d4aa':'#30363d')+';background:'+(staffTab==='salary'?'#00d4aa22':'transparent')+';color:'+(staffTab==='salary'?'#00d4aa':'#7d8590')+';font-family:inherit">💰 My Salary</button></div>';
+h+='<div style="display:flex;gap:6px;padding:12px 20px"><button id="staffAttTab" style="flex:1;padding:10px 6px;border-radius:10px;cursor:pointer;font-size:12px;font-weight:600;border:1px solid '+(staffTab==='att'?'#00d4aa':'#30363d')+';background:'+(staffTab==='att'?'#00d4aa22':'transparent')+';color:'+(staffTab==='att'?'#00d4aa':'#7d8590')+';font-family:inherit">📋 Attendance</button><button id="staffSalTab" style="flex:1;padding:10px 6px;border-radius:10px;cursor:pointer;font-size:12px;font-weight:600;border:1px solid '+(staffTab==='salary'?'#00d4aa':'#30363d')+';background:'+(staffTab==='salary'?'#00d4aa22':'transparent')+';color:'+(staffTab==='salary'?'#00d4aa':'#7d8590')+';font-family:inherit">💰 Salary</button><button id="staffDocsTab" style="flex:1;padding:10px 6px;border-radius:10px;cursor:pointer;font-size:12px;font-weight:600;border:1px solid '+(staffTab==='docs'?'#00d4aa':'#30363d')+';background:'+(staffTab==='docs'?'#00d4aa22':'transparent')+';color:'+(staffTab==='docs'?'#00d4aa':'#7d8590')+';font-family:inherit">📄 Documents</button></div>';
 
-if(staffTab==='salary'){
+if(staffTab==='docs'){
+h+=staffDocsHTML();
+}else if(staffTab==='salary'){
 // SALARY TAB - password protected
 var salPwd=selE.salaryPwd||'';
 if(salPwd&&!salaryPwdSet){
@@ -356,6 +395,8 @@ var salTab=document.getElementById('staffSalTab');if(salTab)salTab.onclick=funct
 // Load salary history
 salHistRef.where('empId','==',selE.id).get().then(function(s){var arr=[];s.forEach(function(d){var o=d.data();o._id=d.id;arr.push(o);});arr.sort(function(a,b){var ta=a.createdAt?((typeof a.createdAt.toDate==='function')?a.createdAt.toDate().getTime():((a.createdAt.seconds||0)*1000)):0;var tb=b.createdAt?((typeof b.createdAt.toDate==='function')?b.createdAt.toDate().getTime():((b.createdAt.seconds||0)*1000)):0;return tb-ta;});SALHIST[selE.id]=arr;render();}).catch(function(){render();});
 };
+var docsTab=document.getElementById('staffDocsTab');if(docsTab)docsTab.onclick=function(){staffTab='docs';showToast('📄 Loading...');loadStaffDocs(selE.id,function(){render();});};
+bindStaffDocs();
 // Salary password
 var salPwdBtn=document.getElementById('salPwdBtn');if(salPwdBtn)salPwdBtn.onclick=function(){var inp=document.getElementById('salPwdIn').value;if(inp===selE.salaryPwd){salaryPwdSet=true;render();}else showToast('❌ Wrong password!');};
 var setSalPwd=document.getElementById('setSalPwd');if(setSalPwd)setSalPwd.onclick=function(){var np=document.getElementById('newSalPwd').value;if(!np||np.length<4)return showToast('Min 4 char!');empRef.doc(selE.id).update({salaryPwd:np}).then(function(){selE.salaryPwd=np;showToast('🔐 Password saved!');render();});};
@@ -614,7 +655,7 @@ else{var sE=sortedE(),lastType='';
 for(var i=0;i<sE.length;i++){var e=sE[i];
 var curType=e.salaryType==='daily'?'daily':'monthly';
 if(curType!==lastType){h+=catHeader(curType);lastType=curType;}
-h+='<div class="card" style="display:flex;justify-content:space-between;align-items:center"><div style="flex:1"><div style="font-size:15px;font-weight:600;color:#e6edf3">'+e.name+(e.isCore?' <span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:9px;font-weight:700;background:#a78bfa22;color:#a78bfa;border:1px solid #a78bfa44;vertical-align:middle">⭐ CORE</span>':'')+'</div><div style="color:#7d8590;font-size:12px;margin-top:2px">📱 '+(e.phone||'-')+'</div><div style="color:#7d8590;font-size:12px">'+(e.salaryType==='monthly'?'₹'+e.salary+'/month':'₹'+e.dailyRate+'/day')+' | PIN: '+(e.pin||'-')+'</div></div><div style="display:flex;gap:8px"><button data-e="'+e.id+'" class="toggleCore" style="background:none;border:none;font-size:18px;cursor:pointer" title="'+(e.isCore?'Remove Core':'Mark Core')+'">'+(e.isCore?'⭐':'☆')+'</button><button data-e="'+e.id+'" class="incSal" style="background:none;border:none;font-size:18px;cursor:pointer" title="Salary increment">📈</button><button data-e="'+e.id+'" class="viewEmpBtn" style="background:none;border:none;font-size:18px;cursor:pointer" title="View month attendance">📅</button><button data-e="'+e.id+'" class="edE" style="background:none;border:none;font-size:18px;cursor:pointer">✏️</button><button data-e="'+e.id+'" class="dlE" style="background:none;border:none;font-size:18px;cursor:pointer">🗑️</button></div></div>';
+h+='<div class="card" style="display:flex;justify-content:space-between;align-items:center"><div style="flex:1"><div style="font-size:15px;font-weight:600;color:#e6edf3">'+e.name+(e.isCore?' <span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:9px;font-weight:700;background:#a78bfa22;color:#a78bfa;border:1px solid #a78bfa44;vertical-align:middle">⭐ CORE</span>':'')+'</div><div style="color:#7d8590;font-size:12px;margin-top:2px">📱 '+(e.phone||'-')+'</div><div style="color:#7d8590;font-size:12px">'+(e.salaryType==='monthly'?'₹'+e.salary+'/month':'₹'+e.dailyRate+'/day')+' | PIN: '+(e.pin||'-')+'</div></div><div style="display:flex;gap:8px"><button data-e="'+e.id+'" class="toggleCore" style="background:none;border:none;font-size:18px;cursor:pointer" title="'+(e.isCore?'Remove Core':'Mark Core')+'">'+(e.isCore?'⭐':'☆')+'</button><button data-e="'+e.id+'" class="incSal" style="background:none;border:none;font-size:18px;cursor:pointer" title="Salary increment">📈</button><button data-e="'+e.id+'" class="viewEmpBtn" style="background:none;border:none;font-size:18px;cursor:pointer" title="View month attendance">📅</button><button data-e="'+e.id+'" class="empDocsBtn" style="background:none;border:none;font-size:18px;cursor:pointer" title="Documents & Agreement">📄</button><button data-e="'+e.id+'" class="edE" style="background:none;border:none;font-size:18px;cursor:pointer">✏️</button><button data-e="'+e.id+'" class="dlE" style="background:none;border:none;font-size:18px;cursor:pointer">🗑️</button></div></div>';
 }}
 }
 
@@ -750,6 +791,16 @@ h+='<h2 class="df" style="font-size:20px;margin-bottom:16px;color:#e6edf3">⚙�
 '<div class="card"><h3 style="color:#00d4aa;font-size:14px;margin-bottom:12px">📍 Office Geo-fence</h3><button id="scL" class="btn bp" style="margin-bottom:12px">📍 Current Location = Office</button><div style="display:flex;gap:8px"><div style="flex:1"><label style="color:#7d8590;font-size:11px">Lat</label><input id="sLa" type="number" step="any" value="'+S.lat+'"></div><div style="flex:1"><label style="color:#7d8590;font-size:11px">Lng</label><input id="sLo" type="number" step="any" value="'+S.lng+'"></div></div><label style="color:#7d8590;font-size:11px">Radius (meters)</label><input id="sR" type="number" value="'+S.radius+'"><button id="svS" class="btn bp">Save Location ✅</button></div>'+
 '<div class="card"><h3 style="color:#00d4aa;font-size:14px;margin-bottom:12px">⏰ Attendance Cutoff Time</h3><p style="color:#7d8590;font-size:12px;margin-bottom:10px">Ei time er pore staff nijera attendance dite parbe na — auto absent hoye jabe</p><div style="display:flex;gap:8px"><div style="flex:1"><label style="color:#7d8590;font-size:11px">Hour (0-23)</label><input id="cutH" type="number" min="0" max="23" value="'+(S.cutoffHr||11)+'"></div><div style="flex:1"><label style="color:#7d8590;font-size:11px">Minute (0-59)</label><input id="cutM" type="number" min="0" max="59" value="'+(S.cutoffMin||10)+'"></div></div><button id="svCut" class="btn bp">Save Cutoff ✅</button></div>'+
 '<div class="card"><h3 style="color:#00d4aa;font-size:14px;margin-bottom:12px">🔐 Admin Password</h3><input id="nPwd" type="password" placeholder="New password likhun"><button id="chPwd" class="btn bp">Password Change ✅</button></div>'+
+'<div class="card"><h3 style="color:#00d4aa;font-size:14px;margin-bottom:6px">📝 Agreement Template (চুক্তির লেখা)</h3><p style="color:#7d8590;font-size:11px;margin-bottom:12px">প্রতিটি রোলের জন্য আলাদা চুক্তি। স্টাফ নিজের রোল অনুযায়ী এটাই দেখবে ও সই করবে।</p>'+
+'<label style="color:#fbbf24;font-size:12px;font-weight:600;display:block;margin-bottom:4px">✂️ ভিডিও এডিটর</label><textarea id="agrEditor" style="width:100%;min-height:120px;padding:12px;border-radius:12px;border:1px solid #30363d;background:#0c1117;color:#e6edf3;font-size:12px;font-family:inherit;margin-bottom:10px;line-height:1.6;resize:vertical">'+escHtml(getRoleTemplate('editor'))+'</textarea>'+
+'<label style="color:#fbbf24;font-size:12px;font-weight:600;display:block;margin-bottom:4px">🎭 অভিনেতা/অভিনেত্রী</label><textarea id="agrActor" style="width:100%;min-height:120px;padding:12px;border-radius:12px;border:1px solid #30363d;background:#0c1117;color:#e6edf3;font-size:12px;font-family:inherit;margin-bottom:10px;line-height:1.6;resize:vertical">'+escHtml(getRoleTemplate('actor'))+'</textarea>'+
+'<label style="color:#fbbf24;font-size:12px;font-weight:600;display:block;margin-bottom:4px">🎥 DOP / ক্যামেরা</label><textarea id="agrDop" style="width:100%;min-height:120px;padding:12px;border-radius:12px;border:1px solid #30363d;background:#0c1117;color:#e6edf3;font-size:12px;font-family:inherit;margin-bottom:10px;line-height:1.6;resize:vertical">'+escHtml(getRoleTemplate('dop'))+'</textarea>'+
+'<label style="color:#fbbf24;font-size:12px;font-weight:600;display:block;margin-bottom:4px">👤 অন্যান্য কর্মী</label><textarea id="agrOther" style="width:100%;min-height:120px;padding:12px;border-radius:12px;border:1px solid #30363d;background:#0c1117;color:#e6edf3;font-size:12px;font-family:inherit;margin-bottom:12px;line-height:1.6;resize:vertical">'+escHtml(getRoleTemplate('other'))+'</textarea>'+
+'<button id="svAgr" class="btn bp">Save Templates 📝</button></div>'+
+'<div class="card"><h3 style="color:#00d4aa;font-size:14px;margin-bottom:6px">📕 Code of Conduct (PDF)</h3><p style="color:#7d8590;font-size:11px;margin-bottom:12px">একটি PDF আপলোড করো — প্রত্যেক স্টাফ নিজের লগইন থেকে এটা পড়তে ও ডাউনলোড করতে পারবে।</p>'+
+(S.coc?('<div style="padding:12px;border-radius:12px;background:#10b98115;border:1px solid #10b98133;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;gap:8px"><div style="min-width:0"><div style="color:#10b981;font-size:13px;font-weight:600">✅ Uploaded</div><div style="color:#7d8590;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+escHtml(S.coc.name||'code_of_conduct.pdf')+'</div></div><button id="cocView" class="btn bs" style="width:auto;padding:8px 14px;font-size:12px;color:#00d4aa;border-color:#00d4aa55">👁️ Preview</button></div>'):'<p style="color:#7d8590;font-size:12px;margin-bottom:12px">এখনো কোনো PDF আপলোড করা হয়নি।</p>')+
+'<label for="cocFile" class="btn bp" style="display:block;text-align:center;cursor:pointer">'+(S.coc?'🔄 Notun PDF Replace korun':'📤 PDF Upload korun')+'</label><input id="cocFile" type="file" accept="application/pdf" style="display:none">'+
+'<div style="background:#fbbf2410;border:1px solid #fbbf2422;border-radius:10px;padding:10px;margin-top:12px"><p style="color:#fbbf24;font-size:11px;line-height:1.6">🔒 মনে রাখবে: আধার/ব্যাঙ্ক প্রুফ সংবেদনশীল তথ্য। স্টাফদের <b>masked আধার</b> আপলোড করতে বলবে আর Firebase Storage rules ঠিকভাবে সেট করবে (নিচের চ্যাটে নিয়ম দেওয়া আছে)।</p></div></div>'+
 '<div class="card"><h3 style="color:#00d4aa;font-size:14px;margin-bottom:12px">📁 Backup</h3><button id="exB" class="btn bp">📤 Export JSON</button></div>'+
 '<div class="card" style="border-color:#ff6b6b33"><button id="clB" style="color:#ff6b6b;border:1px solid #ff6b6b;background:transparent;width:100%;padding:14px;border-radius:12px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit">🗑️ Clear All</button></div>'+
 '<div style="background:#10b98122;border-radius:10px;padding:12px;margin-top:12px"><p style="color:#10b981;font-size:12px;text-align:center;line-height:1.7">🟢 Firebase Cloud Active<br>Data Google server e safe ache</p></div>';
@@ -823,6 +874,7 @@ var vYEl=document.getElementById('vY');if(vYEl)vYEl.onchange=function(){salY=par
 // Staff - FIXED: proper binding
 var addE=document.getElementById('addE');if(addE)addE.onclick=function(){eId=null;showEF();};
 var edBs=document.querySelectorAll('.edE');for(var eb=0;eb<edBs.length;eb++)edBs[eb].onclick=function(){eId=this.getAttribute('data-e');showEF();};
+var empDocsBtns=document.querySelectorAll('.empDocsBtn');for(var edc=0;edc<empDocsBtns.length;edc++)empDocsBtns[edc].onclick=function(){showEmpDocs(this.getAttribute('data-e'));};
 
 // Salary Increment
 var incBs=document.querySelectorAll('.incSal');for(var ib=0;ib<incBs.length;ib++)incBs[ib].onclick=function(){
@@ -981,6 +1033,12 @@ var scL=document.getElementById('scL');if(scL)scL.onclick=function(){if(!navigat
 var svS=document.getElementById('svS');if(svS)svS.onclick=function(){S.lat=parseFloat(document.getElementById('sLa').value);S.lng=parseFloat(document.getElementById('sLo').value);S.radius=parseInt(document.getElementById('sR').value)||200;setRef.set(S,{merge:true}).then(function(){showToast('⚙️ Saved!');});};
 var svCut=document.getElementById('svCut');if(svCut)svCut.onclick=function(){S.cutoffHr=parseInt(document.getElementById('cutH').value);S.cutoffMin=parseInt(document.getElementById('cutM').value);if(isNaN(S.cutoffHr)||S.cutoffHr<0||S.cutoffHr>23)S.cutoffHr=11;if(isNaN(S.cutoffMin)||S.cutoffMin<0||S.cutoffMin>59)S.cutoffMin=10;setRef.set(S,{merge:true}).then(function(){showToast('⏰ Cutoff saved: '+String(S.cutoffHr).padStart(2,'0')+':'+String(S.cutoffMin).padStart(2,'0'));});};
 var chP=document.getElementById('chPwd');if(chP)chP.onclick=function(){var np=document.getElementById('nPwd').value;if(!np||np.length<4)return showToast('Min 4 char!');S.adminPwd=np;setRef.set({adminPwd:np},{merge:true}).then(function(){showToast('🔐 Changed!');document.getElementById('nPwd').value='';});};
+var svAgr=document.getElementById('svAgr');if(svAgr)svAgr.onclick=function(){
+var t={editor:(document.getElementById('agrEditor')||{}).value||'',actor:(document.getElementById('agrActor')||{}).value||'',dop:(document.getElementById('agrDop')||{}).value||'',other:(document.getElementById('agrOther')||{}).value||''};
+S.agreementTemplates=t;showToast('💾 Saving...');
+setRef.set({agreementTemplates:t},{merge:true}).then(function(){showToast('✅ Templates saved!');}).catch(function(){showToast('❌ Error');});};
+var cocFile=document.getElementById('cocFile');if(cocFile)cocFile.onchange=function(){if(this.files&&this.files[0])uploadCoc(this.files[0]);};
+var cocView=document.getElementById('cocView');if(cocView)cocView.onclick=function(){if(S.coc&&S.coc.url)window.open(S.coc.url,'_blank');};
 var exB=document.getElementById('exB');if(exB)exB.onclick=function(){var d=JSON.stringify({employees:E,records:R,adjustments:ADJ,settings:S},null,2),b=new Blob([d],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='ascent_backup_'+fd()+'.json';a.click();showToast('📤 Exported!');};
 var clB=document.getElementById('clB');if(clB)clB.onclick=function(){if(confirm('SHOB data delete hobe!!')){empRef.get().then(function(s){s.forEach(function(d){d.ref.delete();});});recRef.get().then(function(s){s.forEach(function(d){d.ref.delete();});});adjRef.get().then(function(s){s.forEach(function(d){d.ref.delete();});});E=[];R={};ADJ={};showToast('🗑️ Cleared!');render();}};
 }
@@ -1151,11 +1209,11 @@ if(hArea)hArea.innerHTML='';
 
 /* ===== EMPLOYEE FORM ===== */
 function showEF(){
-var e=eId?null:{name:'',phone:'',salaryType:'monthly',salary:'',dailyRate:'',pin:''};
+var e=eId?null:{name:'',phone:'',salaryType:'monthly',salary:'',dailyRate:'',pin:'',role:'other'};
 if(eId){for(var i=0;i<E.length;i++)if(E[i].id===eId){e=E[i];break;}}if(!e)return;
 var area=document.getElementById('eFA');if(!area)return;
 var ftype=e.salaryType||'monthly';
-area.innerHTML='<div class="card" style="border-color:#00d4aa44"><input id="fn" placeholder="Naam" value="'+e.name+'"><input id="fp" placeholder="Phone" value="'+(e.phone||'')+'"><input id="fpi" placeholder="4-digit PIN" maxlength="4" value="'+(e.pin||'')+'"><div style="display:flex;gap:8px;margin-bottom:12px"><button id="tM" style="flex:1;padding:12px;border-radius:10px;cursor:pointer;font-size:13px;border:1px solid '+(ftype==='monthly'?'#00d4aa':'#30363d')+';background:'+(ftype==='monthly'?'#00d4aa22':'transparent')+';color:'+(ftype==='monthly'?'#00d4aa':'#7d8590')+'">📅 Monthly</button><button id="tD" style="flex:1;padding:12px;border-radius:10px;cursor:pointer;font-size:13px;border:1px solid '+(ftype==='daily'?'#00d4aa':'#30363d')+';background:'+(ftype==='daily'?'#00d4aa22':'transparent')+';color:'+(ftype==='daily'?'#00d4aa':'#7d8590')+'">📆 Daily</button></div><input id="fsa" type="number" placeholder="Monthly Salary (₹)" value="'+(e.salary||'')+'" style="display:'+(ftype==='daily'?'none':'block')+'"><input id="fda" type="number" placeholder="Daily Rate (₹)" value="'+(e.dailyRate||'')+'" style="display:'+(ftype==='daily'?'block':'none')+'"><div style="display:flex;gap:8px"><button id="svE" class="btn bp">'+(eId?'Update':'Save')+' ✅</button><button id="cnE" class="btn bs" style="width:auto;padding:14px 20px">Cancel</button></div></div>';
+area.innerHTML='<div class="card" style="border-color:#00d4aa44"><input id="fn" placeholder="Naam" value="'+e.name+'"><input id="fp" placeholder="Phone" value="'+(e.phone||'')+'"><input id="fpi" placeholder="4-digit PIN" maxlength="4" value="'+(e.pin||'')+'"><label style="color:#7d8590;font-size:11px;display:block;margin-bottom:4px">Role (চুক্তির জন্য)</label><select id="frole" style="margin-bottom:11px"><option value="editor"'+(e.role==='editor'?' selected':'')+'>✂️ ভিডিও এডিটর</option><option value="actor"'+(e.role==='actor'?' selected':'')+'>🎭 অভিনেতা/অভিনেত্রী</option><option value="dop"'+(e.role==='dop'?' selected':'')+'>🎥 DOP / ক্যামেরা</option><option value="other"'+((!e.role||e.role==='other')?' selected':'')+'>👤 অন্যান্য</option></select><div style="display:flex;gap:8px;margin-bottom:12px"><button id="tM" style="flex:1;padding:12px;border-radius:10px;cursor:pointer;font-size:13px;border:1px solid '+(ftype==='monthly'?'#00d4aa':'#30363d')+';background:'+(ftype==='monthly'?'#00d4aa22':'transparent')+';color:'+(ftype==='monthly'?'#00d4aa':'#7d8590')+'">📅 Monthly</button><button id="tD" style="flex:1;padding:12px;border-radius:10px;cursor:pointer;font-size:13px;border:1px solid '+(ftype==='daily'?'#00d4aa':'#30363d')+';background:'+(ftype==='daily'?'#00d4aa22':'transparent')+';color:'+(ftype==='daily'?'#00d4aa':'#7d8590')+'">📆 Daily</button></div><input id="fsa" type="number" placeholder="Monthly Salary (₹)" value="'+(e.salary||'')+'" style="display:'+(ftype==='daily'?'none':'block')+'"><input id="fda" type="number" placeholder="Daily Rate (₹)" value="'+(e.dailyRate||'')+'" style="display:'+(ftype==='daily'?'block':'none')+'"><div style="display:flex;gap:8px"><button id="svE" class="btn bp">'+(eId?'Update':'Save')+' ✅</button><button id="cnE" class="btn bs" style="width:auto;padding:14px 20px">Cancel</button></div></div>';
 
 document.getElementById('tM').onclick=function(){ftype='monthly';this.style.cssText='flex:1;padding:12px;border-radius:10px;cursor:pointer;font-size:13px;border:1px solid #00d4aa;background:#00d4aa22;color:#00d4aa';document.getElementById('tD').style.cssText='flex:1;padding:12px;border-radius:10px;cursor:pointer;font-size:13px;border:1px solid #30363d;background:transparent;color:#7d8590';document.getElementById('fsa').style.display='block';document.getElementById('fda').style.display='none';};
 document.getElementById('tD').onclick=function(){ftype='daily';this.style.cssText='flex:1;padding:12px;border-radius:10px;cursor:pointer;font-size:13px;border:1px solid #00d4aa;background:#00d4aa22;color:#00d4aa';document.getElementById('tM').style.cssText='flex:1;padding:12px;border-radius:10px;cursor:pointer;font-size:13px;border:1px solid #30363d;background:transparent;color:#7d8590';document.getElementById('fda').style.display='block';document.getElementById('fsa').style.display='none';};
@@ -1164,11 +1222,174 @@ document.getElementById('svE').onclick=function(){
 var name=document.getElementById('fn').value.trim(),phone=document.getElementById('fp').value.trim(),pinV=document.getElementById('fpi').value;
 var sal=parseFloat(document.getElementById('fsa').value)||0,daily=parseFloat(document.getElementById('fda').value)||0;
 if(!name)return showToast('Naam likhun!');if(!pinV||pinV.length!==4)return showToast('4 digit PIN deen!');
-var data={name:name,phone:phone,salaryType:ftype,salary:sal,dailyRate:daily,pin:pinV};
+var data={name:name,phone:phone,salaryType:ftype,salary:sal,dailyRate:daily,pin:pinV,role:(document.getElementById('frole')||{}).value||'other'};
 showToast('💾 Saving...');
 if(eId){empRef.doc(eId).update(data).then(function(){for(var i=0;i<E.length;i++)if(E[i].id===eId){data.id=eId;E[i]=data;break;}showToast('✅ Updated!');eId=null;render();}).catch(function(){showToast('Error!');});}
 else{empRef.add(data).then(function(doc){data.id=doc.id;E.push(data);showToast('✅ Added!');eId=null;render();}).catch(function(){showToast('Error!');});}};
 document.getElementById('cnE').onclick=function(){eId=null;render();};
+}
+
+/* ===================== DOCUMENTS & AGREEMENTS MODULE ===================== */
+function ensureAuth(cb){
+try{if(firebase.auth().currentUser){cb();return;}firebase.auth().signInAnonymously().then(function(){cb();}).catch(function(){cb();});}catch(e){cb();}
+}
+function compressImg(file,cb){
+try{var reader=new FileReader();
+reader.onload=function(ev){var img=new Image();
+img.onload=function(){var max=1280,w=img.width,hh=img.height;
+if(w>max||hh>max){if(w>hh){hh=Math.round(hh*max/w);w=max;}else{w=Math.round(w*max/hh);hh=max;}}
+try{var c=document.createElement('canvas');c.width=w;c.height=hh;c.getContext('2d').drawImage(img,0,0,w,hh);cb(c.toDataURL('image/jpeg',0.72));}catch(e2){cb(null);}};
+img.onerror=function(){cb(null);};img.src=ev.target.result;};
+reader.onerror=function(){cb(null);};reader.readAsDataURL(file);}catch(e){cb(null);}
+}
+function fmtDate(ts){try{var d=new Date(ts);return d.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+' '+d.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});}catch(e){return '';}}
+
+function loadStaffDocs(empId,cb){
+var done=0;function chk(){done++;if(done>=2&&cb)cb();}
+agrRef.doc(empId).get().then(function(d){if(d.exists)AGR[empId]=d.data();chk();}).catch(function(){chk();});
+kycRef.doc(empId).get().then(function(d){if(d.exists)KYC[empId]=d.data();chk();}).catch(function(){chk();});
+setTimeout(function(){if(done<2&&cb){done=2;cb();}},5000);
+}
+
+function uploadKyc(type,file){
+if(!file||!selE)return;
+if(!storage){showToast('⚠️ Storage setup baki');return;}
+showToast('⏳ Upload hochhe...');
+var go=function(payload,isData){
+ensureAuth(function(){
+var ext=isData?'jpg':((file.name&&file.name.split('.').pop())||'dat');
+var path='kyc/'+selE.id+'/'+type+'_'+Date.now()+'.'+ext;var ref=storage.ref(path);
+var task=isData?ref.putString(payload,'data_url'):ref.put(payload);
+task.then(function(){return ref.getDownloadURL();}).then(function(url){
+var meta={url:url,path:path,name:(file.name||type),uploadedAt:Date.now()};var upd={};upd[type]=meta;
+kycRef.doc(selE.id).set(upd,{merge:true}).then(function(){
+KYC[selE.id]=KYC[selE.id]||{};KYC[selE.id][type]=meta;
+showToast('✅ '+(type==='aadhaar'?'Aadhaar':'Bank proof')+' saved!');render();
+}).catch(function(){showToast('❌ Save error');});
+}).catch(function(){showToast('❌ Upload failed — Storage rules check korun');});
+});};
+if(file.type&&file.type.indexOf('image')===0){compressImg(file,function(d){if(d)go(d,true);else showToast('❌ Image porte parlam na');});}
+else go(file,false);
+}
+
+function uploadCoc(file){
+if(!file)return;
+if(file.type!=='application/pdf')return showToast('❌ PDF file din');
+if(!storage)return showToast('⚠️ Storage setup baki');
+showToast('⏳ CoC upload hochhe...');
+ensureAuth(function(){
+var path='coc/code_of_conduct_'+Date.now()+'.pdf';var ref=storage.ref(path);
+ref.put(file).then(function(){return ref.getDownloadURL();}).then(function(url){
+var meta={url:url,path:path,name:file.name,uploadedAt:Date.now()};
+setRef.set({coc:meta},{merge:true}).then(function(){S.coc=meta;showToast('✅ Code of Conduct uploaded!');render();}).catch(function(){showToast('❌ Save error');});
+}).catch(function(){showToast('❌ Upload failed — Storage rules check korun');});
+});
+}
+
+function signAgreement(){
+if(!selE)return;
+var nameEl=document.getElementById('agrName'),consEl=document.getElementById('agrConsent');
+var nameVal=nameEl?nameEl.value.trim():'';var consent=consEl?consEl.checked:false;
+if(!nameVal)return showToast('❌ Apnar pura naam likhun');
+if(!consent)return showToast('❌ Sommoti box e tick din');
+var role=selE.role||'other';var text=getRoleTemplate(role);
+var rec={empId:selE.id,empName:selE.name,role:role,signedName:nameVal,consent:true,agreementText:text,agreementHash:simpleHash(text),signedAt:Date.now(),device:(navigator.userAgent||'').slice(0,160)};
+showToast('⏳ Saving...');
+agrRef.doc(selE.id).set(rec).then(function(){AGR[selE.id]=rec;showToast('✅ Agreement signed!');render();}).catch(function(){showToast('❌ Error');});
+}
+
+function printAgreement(rec){
+if(!rec)return;var w=window.open('','_blank');if(!w)return showToast('Popup allow korun');
+var body=escHtml(rec.agreementText).replace(/\n/g,'<br>');
+var html='<!doctype html><html lang="bn"><head><meta charset="utf-8"><title>Agreement</title>'+
+'<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Bengali:wght@400;600;700&display=swap" rel="stylesheet">'+
+'<style>body{font-family:"Noto Sans Bengali",sans-serif;max-width:720px;margin:30px auto;padding:0 24px;color:#111;line-height:1.7}h1{font-size:20px;border-bottom:2px solid #0c7a5e;padding-bottom:8px;color:#0c7a5e;margin-bottom:2px}.meta{margin-top:28px;padding-top:16px;border-top:1px dashed #999;font-size:14px}.sig{margin-top:34px}.sig b{display:inline-block;border-bottom:1px solid #111;padding:0 30px 2px;font-size:16px}@media print{body{margin:0}}</style></head><body>'+
+'<h1>Ascent Digital Creation</h1><div style="font-size:13px;color:#555;margin-bottom:18px">Haringhata, Nadia, West Bengal</div>'+
+'<div style="font-size:14px">'+body+'</div>'+
+'<div class="meta"><b>Role:</b> '+escHtml(roleLabel(rec.role))+'<br><b>সই করার সময়:</b> '+escHtml(fmtDate(rec.signedAt))+'<br><b>Document ID:</b> '+escHtml(rec.agreementHash)+'</div>'+
+'<div class="sig">স্বাক্ষরকারী (ডিজিটাল সম্মতি): <b>'+escHtml(rec.signedName)+'</b><div style="font-size:11px;color:#777;margin-top:6px">✓ Information Technology Act, 2000 অনুযায়ী ইলেকট্রনিকভাবে গৃহীত</div></div>'+
+'</body></html>';
+w.document.open();w.document.write(html);w.document.close();
+setTimeout(function(){try{w.focus();w.print();}catch(e){}},700);
+}
+
+function fileRow(label,emoji,meta,inputId,note){
+var h='<div style="padding:14px;border-radius:12px;border:1px solid '+(meta?'#10b98133':'#30363d')+';background:'+(meta?'#10b98110':'#161b22')+';margin-bottom:12px">';
+h+='<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:'+(meta?'10px':'8px')+'"><div style="font-size:14px;font-weight:600;color:#e6edf3">'+emoji+' '+label+'</div>'+(meta?'<span style="font-size:11px;color:#10b981;font-weight:600">✅ Uploaded</span>':'<span style="font-size:11px;color:#fbbf24">⏳ Baki</span>')+'</div>';
+if(meta){h+='<div style="color:#7d8590;font-size:11px;margin-bottom:10px">'+escHtml(meta.name||'')+' · '+fmtDate(meta.uploadedAt)+'</div>';
+h+='<div style="display:flex;gap:8px"><button data-url="'+escHtml(meta.url)+'" class="docView btn bs" style="flex:1;padding:9px;font-size:12px;color:#00d4aa;border-color:#00d4aa55">👁️ Dekhun</button><label for="'+inputId+'" class="btn bs" style="flex:1;padding:9px;font-size:12px;text-align:center;cursor:pointer">🔄 Replace</label></div>';}
+else{h+='<label for="'+inputId+'" class="btn bp" style="display:block;text-align:center;padding:11px;cursor:pointer;font-size:13px">📤 Upload korun</label>';}
+h+='<input id="'+inputId+'" type="file" accept="image/*,application/pdf" style="display:none">';
+if(note)h+='<div style="color:#7d8590;font-size:10px;margin-top:8px;line-height:1.5">'+note+'</div>';
+h+='</div>';return h;
+}
+
+function staffDocsHTML(){
+if(!selE)return '';
+var h='<div style="padding:16px 20px 40px">';var role=selE.role||'other';var signed=AGR[selE.id];
+h+='<div class="card"><h3 style="color:#00d4aa;font-size:15px;margin-bottom:4px">📝 চুক্তি / Agreement</h3><div style="color:#7d8590;font-size:11px;margin-bottom:12px">Role: '+roleLabel(role)+'</div>';
+if(signed){
+h+='<div style="padding:16px;border-radius:12px;background:#10b98112;border:1px solid #10b98133;text-align:center"><div style="font-size:30px">✅</div><div style="color:#10b981;font-size:15px;font-weight:700;margin-top:6px">সই সম্পন্ন হয়েছে</div><div style="color:#e6edf3;font-size:13px;margin-top:4px">'+escHtml(signed.signedName)+'</div><div style="color:#7d8590;font-size:11px;margin-top:2px">'+fmtDate(signed.signedAt)+'</div></div>';
+h+='<button id="agrDownload" class="btn bp" style="margin-top:12px">📄 Download / Print korun</button>';
+}else{
+h+='<div style="max-height:220px;overflow-y:auto;padding:14px;border-radius:12px;background:#0c1117;border:1px solid #30363d;font-size:12.5px;line-height:1.7;white-space:pre-wrap;color:#c9d1d9;margin-bottom:14px">'+escHtml(getRoleTemplate(role))+'</div>';
+h+='<input id="agrName" placeholder="আপনার পুরো নাম" value="'+escHtml(selE.name)+'">';
+h+='<label style="display:flex;align-items:flex-start;gap:10px;padding:12px;border-radius:12px;background:#161b22;border:1px solid #30363d;margin-bottom:12px;cursor:pointer"><input type="checkbox" id="agrConsent" style="width:20px;height:20px;margin:0;flex-shrink:0"><span style="font-size:12px;color:#c9d1d9;line-height:1.5">আমি উপরের সম্পূর্ণ চুক্তি পড়েছি, বুঝেছি এবং স্বেচ্ছায় সম্মত হচ্ছি।</span></label>';
+h+='<button id="agrSign" class="btn bp">✍️ সই করুন (Sign)</button>';
+}
+h+='</div>';
+var kyc=KYC[selE.id]||{};
+h+='<div class="card"><h3 style="color:#00d4aa;font-size:15px;margin-bottom:12px">🪪 আমার নথি / My Documents</h3>';
+h+=fileRow('Aadhaar Card','🪪',kyc.aadhaar,'aadhaarFile','🔒 সুরক্ষার জন্য <b>masked আধার</b> (প্রথম ৮ সংখ্যা ঢাকা) আপলোড করুন — UIDAI সাইট থেকে ডাউনলোড করা যায়।');
+h+=fileRow('Bank Proof (Passbook/Cheque)','🏦',kyc.bank,'bankFile','বেতন পাঠানোর জন্য — পাসবুকের প্রথম পাতা বা ক্যান্সেল চেকের ছবি।');
+h+='</div>';
+h+='<div class="card"><h3 style="color:#00d4aa;font-size:15px;margin-bottom:12px">📕 Code of Conduct</h3>';
+if(S.coc&&S.coc.url){h+='<p style="color:#7d8590;font-size:12px;margin-bottom:12px">কোম্পানির আচরণবিধি — পড়ুন ও নিজের কাছে রাখুন।</p><div style="display:flex;gap:8px"><button id="cocReadStaff" class="btn bp" style="flex:1">👁️ Read</button><button id="cocDlStaff" class="btn bs" style="flex:1;color:#00d4aa;border-color:#00d4aa55">⬇️ Download</button></div>';}
+else{h+='<p style="color:#7d8590;font-size:12px">এখনো Admin কোনো Code of Conduct আপলোড করেননি।</p>';}
+h+='</div></div>';
+return h;
+}
+
+function bindStaffDocs(){
+var agrSign=document.getElementById('agrSign');if(agrSign)agrSign.onclick=function(){signAgreement();};
+var agrDl=document.getElementById('agrDownload');if(agrDl)agrDl.onclick=function(){printAgreement(AGR[selE.id]);};
+var af=document.getElementById('aadhaarFile');if(af)af.onchange=function(){if(this.files&&this.files[0])uploadKyc('aadhaar',this.files[0]);};
+var bf=document.getElementById('bankFile');if(bf)bf.onchange=function(){if(this.files&&this.files[0])uploadKyc('bank',this.files[0]);};
+var dv=document.querySelectorAll('.docView');for(var i=0;i<dv.length;i++)dv[i].onclick=function(){var u=this.getAttribute('data-url');if(u)window.open(u,'_blank');};
+var cr=document.getElementById('cocReadStaff');if(cr)cr.onclick=function(){if(S.coc&&S.coc.url)window.open(S.coc.url,'_blank');};
+var cd=document.getElementById('cocDlStaff');if(cd)cd.onclick=function(){if(S.coc&&S.coc.url)window.open(S.coc.url,'_blank');};
+}
+
+function showEmpDocs(empId){
+var emp=null;for(var i=0;i<E.length;i++)if(E[i].id===empId){emp=E[i];break;}
+if(!emp)return;var area=document.getElementById('eFA');if(!area)return;
+area.innerHTML='<div class="card" style="border-color:#00d4aa44;text-align:center"><div class="spin" style="margin:10px auto"></div><p style="color:#7d8590;font-size:12px">Loading docs...</p></div>';
+var agr=null,kyc={},done=0;
+function finish(){
+var h='<div class="card" style="border-color:#00d4aa44"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><div><div style="font-size:16px;font-weight:700;color:#e6edf3">📄 '+escHtml(emp.name)+'</div><div style="color:#7d8590;font-size:11px">Role: '+roleLabel(emp.role||'other')+'</div></div><button id="docClose" class="btn bs" style="width:auto;padding:6px 12px;font-size:12px">✕ Close</button></div>';
+h+='<div style="padding:14px;border-radius:12px;border:1px solid '+(agr?'#10b98133':'#ff6b6b33')+';background:'+(agr?'#10b98110':'#ff6b6b10')+';margin-bottom:12px"><div style="font-size:13px;font-weight:600;color:#e6edf3;margin-bottom:6px">📝 Agreement</div>';
+if(agr){h+='<div style="color:#10b981;font-size:12px">✅ Signed — '+escHtml(agr.signedName)+'</div><div style="color:#7d8590;font-size:11px;margin-top:2px">'+fmtDate(agr.signedAt)+'</div><button id="docAgrView" class="btn bs" style="margin-top:10px;color:#00d4aa;border-color:#00d4aa55;font-size:12px;padding:8px">📄 View / Print</button>';}
+else{h+='<div style="color:#ff6b6b;font-size:12px">❌ Akhono sign koreni</div>';}
+h+='</div>';
+h+=adminDocRow('🪪 Aadhaar',kyc.aadhaar);
+h+=adminDocRow('🏦 Bank Proof',kyc.bank);
+h+='<div style="background:#fbbf2410;border:1px solid #fbbf2422;border-radius:10px;padding:10px;margin-top:6px"><p style="color:#fbbf24;font-size:11px;line-height:1.5">স্টাফ নিজে নিজের লগইন (PIN → 📄 Documents) থেকে এগুলো আপলোড/সই করবে। তুমি এখানে শুধু দেখতে ও ডাউনলোড করতে পারবে।</p></div>';
+h+='</div>';
+area.innerHTML=h;
+var dc=document.getElementById('docClose');if(dc)dc.onclick=function(){area.innerHTML='';};
+var av=document.getElementById('docAgrView');if(av)av.onclick=function(){printAgreement(agr);};
+var dvs=area.querySelectorAll('.adminDocView');for(var j=0;j<dvs.length;j++)dvs[j].onclick=function(){var u=this.getAttribute('data-url');if(u)window.open(u,'_blank');};
+}
+function chk(){done++;if(done>=2)finish();}
+agrRef.doc(empId).get().then(function(d){if(d.exists)agr=d.data();chk();}).catch(function(){chk();});
+kycRef.doc(empId).get().then(function(d){if(d.exists)kyc=d.data();chk();}).catch(function(){chk();});
+setTimeout(function(){if(done<2){done=2;finish();}},5000);
+}
+function adminDocRow(label,meta){
+var h='<div style="padding:14px;border-radius:12px;border:1px solid '+(meta?'#10b98133':'#30363d')+';background:'+(meta?'#10b98110':'#161b22')+';margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;gap:8px"><div style="min-width:0"><div style="font-size:13px;font-weight:600;color:#e6edf3">'+label+'</div>';
+if(meta)h+='<div style="color:#7d8590;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+escHtml(meta.name||'')+' · '+fmtDate(meta.uploadedAt)+'</div></div><button data-url="'+escHtml(meta.url)+'" class="adminDocView btn bs" style="width:auto;padding:8px 14px;font-size:12px;color:#00d4aa;border-color:#00d4aa55;flex-shrink:0">👁️ Dekhun</button>';
+else h+='<div style="color:#fbbf24;font-size:11px">⏳ Upload baki</div></div><span style="font-size:11px;color:#7d8590;flex-shrink:0">—</span>';
+h+='</div>';return h;
 }
 
 loadAll(function(){render();});
