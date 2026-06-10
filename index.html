@@ -78,11 +78,13 @@ var adjRef=db.collection('adjustments');
 var salHistRef=db.collection('salaryHistory');
 var agrRef=db.collection('agreements');
 var kycRef=db.collection('kyc');
+var cocSignRef=db.collection('cocSign');
 var storage=null;try{storage=firebase.storage();}catch(e){storage=null;}
 try{firebase.auth().signInAnonymously().catch(function(){});}catch(e){}
 
 var E=[],R={},S={lat:22.5726,lng:88.3639,radius:200,adminPwd:'ascent2026'},ADJ={},LATE={},SALHIST={};
-var AGR={},KYC={}; /* AGR[empId]=signed record, KYC[empId]={aadhaar,bank} */
+var AGR={},KYC={},COCSIGN={}; /* AGR[empId]=signed record, KYC[empId]={aadhaar,bank}, COCSIGN[empId]=signed coc */
+var archiveOpen=false;
 var loaded=false;
 
 /* ===== AGREEMENT TEMPLATES (Bengali, admin-editable) ===== */
@@ -102,13 +104,17 @@ var DEFAULT_AGR={
 editor:genTemplate('ভিডিও এডিটর','আমি সময়মতো ও এডিট-ব্রিফ অনুযায়ী ভিডিও ডেলিভার করব এবং কাঁচা ফুটেজ ও প্রজেক্ট ফাইল গোপন রাখব।'),
 actor:genTemplate('অভিনেতা/অভিনেত্রী','আমি শুটিং শিডিউল মেনে চলব এবং কোম্পানির কনটেন্টে আমার অভিনয় ব্যবহারের পূর্ণ অধিকার কোম্পানিকে দেব।'),
 dop:genTemplate('DOP / ক্যামেরা','আমি শুটিং সরঞ্জাম যত্নসহকারে ব্যবহার করব এবং ধারণকৃত সমস্ত ফুটেজ কোম্পানির সম্পত্তি হিসেবে রাখব।'),
-other:genTemplate('কর্মী','')
+other:genTemplate('অন্যান্য কর্মী','আমি আমার উপর অর্পিত সকল দায়িত্ব নিষ্ঠার সাথে, সময়মতো ও কোম্পানির নির্দেশ অনুযায়ী পালন করব এবং কোম্পানির সম্পত্তি ও তথ্য যত্নসহকারে রক্ষা করব।')
 };
 function getRoleTemplate(role){
 var t=S.agreementTemplates||{};
-if(t[role]&&t[role].trim())return t[role];
+if(role==='actor'){
+if(t.actor&&t.actor.trim())return t.actor;
+return DEFAULT_AGR.actor;
+}
+/* editor, dop, other -> ek merged "Anyanno kormi" chukti */
 if(t.other&&t.other.trim())return t.other;
-return DEFAULT_AGR[role]||DEFAULT_AGR.other;
+return DEFAULT_AGR.other;
 }
 function roleLabel(r){return r==='editor'?'ভিডিও এডিটর':r==='actor'?'অভিনেতা/অভিনেত্রী':r==='dop'?'DOP / ক্যামেরা':'কর্মী';}
 function simpleHash(str){var h=5381;for(var i=0;i<str.length;i++){h=((h<<5)+h)+str.charCodeAt(i);h=h&0xffffffff;}return (h>>>0).toString(16);}
@@ -171,7 +177,9 @@ var mode=null,pg='dash',sStep='sel',selE=null,pin='',eId=null,attD=fd(),salM=new
 var viewEmpId=null; // for individual attendance view
 var app=document.getElementById('app');
 
-function sortedE(){var m=[],d=[];for(var i=0;i<E.length;i++){if(E[i].salaryType==='daily')d.push(E[i]);else m.push(E[i]);}return m.concat(d);}
+function activeE(){var a=[];for(var i=0;i<E.length;i++){if(!E[i].archived)a.push(E[i]);}return a;}
+function archivedE(){var a=[];for(var i=0;i<E.length;i++){if(E[i].archived)a.push(E[i]);}return a;}
+function sortedE(){var act=activeE(),m=[],d=[];for(var i=0;i<act.length;i++){if(act[i].salaryType==='daily')d.push(act[i]);else m.push(act[i]);}return m.concat(d);}
 function catHeader(type){return '<div style="padding:8px 0;margin-top:8px;margin-bottom:4px;border-bottom:2px solid '+(type==='monthly'?'#00d4aa33':'#fbbf2433')+'"><span style="font-size:13px;font-weight:700;color:'+(type==='monthly'?'#00d4aa':'#fbbf24')+'">'+(type==='monthly'?'📅 Monthly Staff':'📆 Daily Staff')+'</span></div>';}
 
 function render(){
@@ -406,7 +414,7 @@ var prevCard=document.getElementById('prevPaidCard');if(prevCard)prevCard.onclic
 var nBs=document.querySelectorAll('.nB');for(var nb=0;nb<nBs.length;nb++)nBs[nb].onclick=function(){var v=this.getAttribute('data-v');if(v==='del')pin=pin.slice(0,-1);else if(pin.length<4)pin+=v;render();};
 var vB=document.getElementById('vBtn');if(vB)vB.onclick=function(){
 if(pin.length!==4)return showToast('4 digit PIN deen');
-var matches=[];for(var mi=0;mi<E.length;mi++){if(E[mi].pin&&String(E[mi].pin)===pin)matches.push(E[mi]);}
+var matches=[];for(var mi=0;mi<E.length;mi++){if(!E[mi].archived&&E[mi].pin&&String(E[mi].pin)===pin)matches.push(E[mi]);}
 if(matches.length===0){showToast('❌ Bhul PIN!');pin='';render();return;}
 if(matches.length>1){showToast('⚠️ Ekadhik staff er PIN eki rokom — Admin ke unique PIN set korte bolun');pin='';render();return;}
 selE=matches[0];
@@ -577,11 +585,11 @@ updateNavHighlight();
 /* DASHBOARD */
 if(pg==='dash'){
 var pr=0,hf=0;for(var k in R)if(R[k].date===today){if(R[k].status==='present')pr++;else if(R[k].status==='half')hf++;}
-var ab=Math.max(0,E.length-pr-hf);
+var ab=Math.max(0,activeE().length-pr-hf);
 h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><div><h1 class="df" style="font-size:20px;margin-bottom:2px;color:#e6edf3">Ascent Digital Creation</h1><p style="color:#7d8590;font-size:12px">'+bn()+'</p></div><button id="bk" class="btn bs" style="width:auto;padding:6px 12px;font-size:12px">← Back</button></div>';
-h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:20px"><div style="background:#00d4aa22;border-radius:14px;padding:16px;border:1px solid #00d4aa33"><div style="font-size:28px;font-weight:700;color:#00d4aa">'+E.length+'</div><div style="font-size:12px;color:#7d8590">Staff</div></div><div style="background:#10b98122;border-radius:14px;padding:16px;border:1px solid #10b98133"><div style="font-size:28px;font-weight:700;color:#10b981">'+pr+'</div><div style="font-size:12px;color:#7d8590">Present</div></div><div style="background:#fbbf2422;border-radius:14px;padding:16px;border:1px solid #fbbf2433"><div style="font-size:28px;font-weight:700;color:#fbbf24">'+hf+'</div><div style="font-size:12px;color:#7d8590">Half Day</div></div><div style="background:#ff6b6b22;border-radius:14px;padding:16px;border:1px solid #ff6b6b33"><div style="font-size:28px;font-weight:700;color:#ff6b6b">'+ab+'</div><div style="font-size:12px;color:#7d8590">Absent</div></div></div>';
+h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:20px"><div style="background:#00d4aa22;border-radius:14px;padding:16px;border:1px solid #00d4aa33"><div style="font-size:28px;font-weight:700;color:#00d4aa">'+activeE().length+'</div><div style="font-size:12px;color:#7d8590">Staff</div></div><div style="background:#10b98122;border-radius:14px;padding:16px;border:1px solid #10b98133"><div style="font-size:28px;font-weight:700;color:#10b981">'+pr+'</div><div style="font-size:12px;color:#7d8590">Present</div></div><div style="background:#fbbf2422;border-radius:14px;padding:16px;border:1px solid #fbbf2433"><div style="font-size:28px;font-weight:700;color:#fbbf24">'+hf+'</div><div style="font-size:12px;color:#7d8590">Half Day</div></div><div style="background:#ff6b6b22;border-radius:14px;padding:16px;border:1px solid #ff6b6b33"><div style="font-size:28px;font-weight:700;color:#ff6b6b">'+ab+'</div><div style="font-size:12px;color:#7d8590">Absent</div></div></div>';
 h+='<div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:12px"><h3 style="font-size:15px;color:#e6edf3">📋 Ajker Status</h3><button id="refBtn" style="background:none;border:none;color:#00d4aa;font-size:12px;cursor:pointer">🔄 Refresh</button></div>';
-if(!E.length)h+='<p style="color:#7d8590;font-size:13px">Staff tab e employee add korun</p>';
+if(!activeE().length)h+='<p style="color:#7d8590;font-size:13px">Staff tab e employee add korun</p>';
 else{var sE=sortedE(),lastType='';
 for(var i=0;i<sE.length;i++){var e=sE[i],rec=R[e.id+'_'+today],st2=rec?(rec.status==='present'?'✅':rec.status==='half'?'🕐':'❌'):'⏳';
 var curType=e.salaryType==='daily'?'daily':'monthly';
@@ -629,12 +637,12 @@ h+='<div class="card" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:
 // DATE WISE REGISTER
 h+='<h2 class="df" style="font-size:20px;margin-bottom:16px;color:#e6edf3">📋 Attendance Register</h2><input type="date" id="aD" value="'+attD+'">';
 h+='<div class="card">';
-if(!E.length)h+='<p style="color:#7d8590">Staff add korun</p>';
+if(!activeE().length)h+='<p style="color:#7d8590">Staff add korun</p>';
 else{var sE=sortedE(),lastType='';
 for(var i=0;i<sE.length;i++){var e=sE[i],k2=e.id+'_'+attD,rec=R[k2];
 var curType=e.salaryType==='daily'?'daily':'monthly';
 if(curType!==lastType){h+=catHeader(curType);lastType=curType;}
-h+='<div style="padding:12px 0;'+(i<E.length-1?'border-bottom:1px solid #30363d':'')+';display:flex;justify-content:space-between;align-items:center">';
+h+='<div style="padding:12px 0;'+(i<sE.length-1?'border-bottom:1px solid #30363d':'')+';display:flex;justify-content:space-between;align-items:center">';
 h+='<div style="flex:1"><div style="font-size:14px;font-weight:500;color:#e6edf3">'+e.name+'</div></div>';
 h+='<div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">';
 var ts=['present','half','absent'];for(var t=0;t<ts.length;t++){var ty=ts[t],ac=rec&&rec.status===ty,col=ty==='present'?'#10b981':ty==='half'?'#fbbf24':'#ff6b6b',bg2=ac?(ty==='present'?'#10b98122':ty==='half'?'#fbbf2422':'#ff6b6b22'):'transparent',lb=ty==='present'?'✅P':ty==='half'?'🕐H':'❌A';
@@ -649,17 +657,35 @@ h+='</div>';
 
 /* STAFF - FIXED: stable rendering */
 else if(pg==='staff'){
-h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2 class="df" style="font-size:20px;color:#e6edf3">👥 Staff ('+E.length+')</h2><button id="addE" class="btn bp" style="width:auto;padding:8px 16px;font-size:13px">+ Add</button></div>';
+h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2 class="df" style="font-size:20px;color:#e6edf3">👥 Staff ('+activeE().length+')</h2><button id="addE" class="btn bp" style="width:auto;padding:8px 16px;font-size:13px">+ Add</button></div>';
 h+='<div id="eFA"></div>';
-if(!E.length)h+='<p style="color:#7d8590;text-align:center;margin-top:40px">+ Add button e staff add korun</p>';
+if(!activeE().length)h+='<p style="color:#7d8590;text-align:center;margin-top:40px">+ Add button e staff add korun</p>';
 else{var sE=sortedE(),lastType='';
 for(var i=0;i<sE.length;i++){var e=sE[i];
 var curType=e.salaryType==='daily'?'daily':'monthly';
 if(curType!==lastType){h+=catHeader(curType);lastType=curType;}
-h+='<div class="card" style="display:flex;justify-content:space-between;align-items:center"><div style="flex:1"><div style="font-size:15px;font-weight:600;color:#e6edf3">'+e.name+(e.isCore?' <span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:9px;font-weight:700;background:#a78bfa22;color:#a78bfa;border:1px solid #a78bfa44;vertical-align:middle">⭐ CORE</span>':'')+'</div><div style="color:#7d8590;font-size:12px;margin-top:2px">📱 '+(e.phone||'-')+'</div><div style="color:#7d8590;font-size:12px">'+(e.salaryType==='monthly'?'₹'+e.salary+'/month':'₹'+e.dailyRate+'/day')+' | PIN: '+(e.pin||'-')+'</div></div><div style="display:flex;gap:8px"><button data-e="'+e.id+'" class="toggleCore" style="background:none;border:none;font-size:18px;cursor:pointer" title="'+(e.isCore?'Remove Core':'Mark Core')+'">'+(e.isCore?'⭐':'☆')+'</button><button data-e="'+e.id+'" class="incSal" style="background:none;border:none;font-size:18px;cursor:pointer" title="Salary increment">📈</button><button data-e="'+e.id+'" class="viewEmpBtn" style="background:none;border:none;font-size:18px;cursor:pointer" title="View month attendance">📅</button><button data-e="'+e.id+'" class="empDocsBtn" style="background:none;border:none;font-size:18px;cursor:pointer" title="Documents & Agreement">📄</button><button data-e="'+e.id+'" class="edE" style="background:none;border:none;font-size:18px;cursor:pointer">✏️</button><button data-e="'+e.id+'" class="dlE" style="background:none;border:none;font-size:18px;cursor:pointer">🗑️</button></div></div>';
+h+='<div class="card" style="display:flex;justify-content:space-between;align-items:center"><div style="flex:1"><div style="font-size:15px;font-weight:600;color:#e6edf3">'+e.name+(e.isCore?' <span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:9px;font-weight:700;background:#a78bfa22;color:#a78bfa;border:1px solid #a78bfa44;vertical-align:middle">⭐ CORE</span>':'')+'</div><div style="color:#7d8590;font-size:12px;margin-top:2px">📱 '+(e.phone||'-')+'</div><div style="color:#7d8590;font-size:12px">'+(e.salaryType==='monthly'?'₹'+e.salary+'/month':'₹'+e.dailyRate+'/day')+' | PIN: '+(e.pin||'-')+'</div></div><div style="display:flex;gap:8px"><button data-e="'+e.id+'" class="toggleCore" style="background:none;border:none;font-size:18px;cursor:pointer" title="'+(e.isCore?'Remove Core':'Mark Core')+'">'+(e.isCore?'⭐':'☆')+'</button><button data-e="'+e.id+'" class="incSal" style="background:none;border:none;font-size:18px;cursor:pointer" title="Salary increment">📈</button><button data-e="'+e.id+'" class="viewEmpBtn" style="background:none;border:none;font-size:18px;cursor:pointer" title="View month attendance">📅</button><button data-e="'+e.id+'" class="empDocsBtn" style="background:none;border:none;font-size:18px;cursor:pointer" title="Documents & Agreement">📄</button><button data-e="'+e.id+'" class="edE" style="background:none;border:none;font-size:18px;cursor:pointer">✏️</button><button data-e="'+e.id+'" class="arE" style="background:none;border:none;font-size:18px;cursor:pointer" title="Archive (kaaj chhere diyeche)">📥</button></div></div>';
 }}
+/* ===== ARCHIVED STAFF (kaaj chhere diyeche) ===== */
+var arch=archivedE();
+if(arch.length){
+arch.sort(function(a,b){return (b.archivedAt||0)-(a.archivedAt||0);});
+h+='<div class="card" style="border-color:#7d859033;margin-top:20px;padding:0;overflow:hidden">';
+h+='<div id="archHdr" style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;padding:14px 16px;background:#7d859011"><div style="font-size:14px;font-weight:700;color:#7d8590">🗄️ Archived Staff ('+arch.length+')</div><span style="color:#7d8590;font-size:16px">'+(archiveOpen?'▲':'▼')+'</span></div>';
+if(archiveOpen){
+h+='<div style="padding:8px 14px 14px">';
+h+='<p style="color:#7d8590;font-size:11px;line-height:1.6;margin-bottom:10px">এরা আর কোনো লিস্টে আসবে না, কিন্তু এদের আগের সব রেকর্ড (attendance, salary, payslip, documents) সুরক্ষিত আছে। Restore করলে আবার ফিরে আসবে। Permanent delete করলে সব মুছে যাবে — ফেরানো যাবে না।</p>';
+for(var ai=0;ai<arch.length;ai++){var ae=arch[ai];
+h+='<div style="padding:12px;border-radius:12px;border:1px solid #30363d;background:#0c1117;margin-bottom:10px">';
+h+='<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px"><div style="min-width:0"><div style="font-size:14px;font-weight:600;color:#e6edf3">'+escHtml(ae.name)+'</div><div style="color:#7d8590;font-size:11px;margin-top:2px">📱 '+escHtml(ae.phone||'-')+' | Role: '+roleLabel(ae.role||'other')+'</div>'+(ae.archivedAt?'<div style="color:#7d8590;font-size:10px;margin-top:2px">🗄️ Archived: '+fmtDate(ae.archivedAt)+'</div>':'')+'</div></div>';
+h+='<div style="display:flex;gap:6px;margin-top:10px"><button data-e="'+ae.id+'" class="empDocsBtn btn bs" style="flex:1;padding:8px;font-size:11px">📄 Records</button><button data-e="'+ae.id+'" class="restoreE btn bs" style="flex:1;padding:8px;font-size:11px;color:#10b981;border-color:#10b98155">♻️ Restore</button><button data-e="'+ae.id+'" class="permDelE btn bs" style="flex:1;padding:8px;font-size:11px;color:#ff6b6b;border-color:#ff6b6b55">🗑️ Delete</button></div>';
+h+='</div>';
 }
-
+h+='</div>';
+}
+h+='</div>';
+}
+}
 /* SALARY - FIXED: /30 calculation + overtime + fine + slip download */
 else if(pg==='salary'){
 var wd=dim(salY,salM)-csun(salY,salM);
@@ -771,7 +797,7 @@ h+='</div>';
 }
 h+='</div>';}
 // Bottom total bar
-if(E.length){
+if(activeE().length){
 var totalRemaining=total-totalPaidAll;
 if(totalRemaining<0)totalRemaining=0;
 h+='<div style="background:#00d4aa22;border-radius:14px;padding:16px;border:1px solid #00d4aa44;text-align:center">';
@@ -792,11 +818,9 @@ h+='<h2 class="df" style="font-size:20px;margin-bottom:16px;color:#e6edf3">⚙�
 '<div class="card"><h3 style="color:#00d4aa;font-size:14px;margin-bottom:12px">📍 Office Geo-fence</h3><button id="scL" class="btn bp" style="margin-bottom:12px">📍 Current Location = Office</button><div style="display:flex;gap:8px"><div style="flex:1"><label style="color:#7d8590;font-size:11px">Lat</label><input id="sLa" type="number" step="any" value="'+S.lat+'"></div><div style="flex:1"><label style="color:#7d8590;font-size:11px">Lng</label><input id="sLo" type="number" step="any" value="'+S.lng+'"></div></div><label style="color:#7d8590;font-size:11px">Radius (meters)</label><input id="sR" type="number" value="'+S.radius+'"><button id="svS" class="btn bp">Save Location ✅</button></div>'+
 '<div class="card"><h3 style="color:#00d4aa;font-size:14px;margin-bottom:12px">⏰ Attendance Cutoff Time</h3><p style="color:#7d8590;font-size:12px;margin-bottom:10px">Ei time er pore staff nijera attendance dite parbe na — auto absent hoye jabe</p><div style="display:flex;gap:8px"><div style="flex:1"><label style="color:#7d8590;font-size:11px">Hour (0-23)</label><input id="cutH" type="number" min="0" max="23" value="'+(S.cutoffHr||11)+'"></div><div style="flex:1"><label style="color:#7d8590;font-size:11px">Minute (0-59)</label><input id="cutM" type="number" min="0" max="59" value="'+(S.cutoffMin||10)+'"></div></div><button id="svCut" class="btn bp">Save Cutoff ✅</button></div>'+
 '<div class="card"><h3 style="color:#00d4aa;font-size:14px;margin-bottom:12px">🔐 Admin Password</h3><input id="nPwd" type="password" placeholder="New password likhun"><button id="chPwd" class="btn bp">Password Change ✅</button></div>'+
-'<div class="card"><h3 style="color:#00d4aa;font-size:14px;margin-bottom:6px">📝 Agreement Template (চুক্তির লেখা)</h3><p style="color:#7d8590;font-size:11px;margin-bottom:12px">প্রতিটি রোলের জন্য আলাদা চুক্তি। স্টাফ নিজের রোল অনুযায়ী এটাই দেখবে ও সই করবে।</p>'+
-'<label style="color:#fbbf24;font-size:12px;font-weight:600;display:block;margin-bottom:4px">✂️ ভিডিও এডিটর</label><textarea id="agrEditor" style="width:100%;min-height:120px;padding:12px;border-radius:12px;border:1px solid #30363d;background:#0c1117;color:#e6edf3;font-size:12px;font-family:inherit;margin-bottom:10px;line-height:1.6;resize:vertical">'+escHtml(getRoleTemplate('editor'))+'</textarea>'+
+'<div class="card"><h3 style="color:#00d4aa;font-size:14px;margin-bottom:6px">📝 Agreement Template (চুক্তির লেখা)</h3><p style="color:#7d8590;font-size:11px;margin-bottom:12px">দুই ধরনের চুক্তি — অভিনেতা/অভিনেত্রীর জন্য আলাদা, এবং বাকি সব কর্মীর জন্য একটি। স্টাফ নিজের রোল অনুযায়ী এটাই দেখবে ও সই করবে।</p>'+
 '<label style="color:#fbbf24;font-size:12px;font-weight:600;display:block;margin-bottom:4px">🎭 অভিনেতা/অভিনেত্রী</label><textarea id="agrActor" style="width:100%;min-height:120px;padding:12px;border-radius:12px;border:1px solid #30363d;background:#0c1117;color:#e6edf3;font-size:12px;font-family:inherit;margin-bottom:10px;line-height:1.6;resize:vertical">'+escHtml(getRoleTemplate('actor'))+'</textarea>'+
-'<label style="color:#fbbf24;font-size:12px;font-weight:600;display:block;margin-bottom:4px">🎥 DOP / ক্যামেরা</label><textarea id="agrDop" style="width:100%;min-height:120px;padding:12px;border-radius:12px;border:1px solid #30363d;background:#0c1117;color:#e6edf3;font-size:12px;font-family:inherit;margin-bottom:10px;line-height:1.6;resize:vertical">'+escHtml(getRoleTemplate('dop'))+'</textarea>'+
-'<label style="color:#fbbf24;font-size:12px;font-weight:600;display:block;margin-bottom:4px">👤 অন্যান্য কর্মী</label><textarea id="agrOther" style="width:100%;min-height:120px;padding:12px;border-radius:12px;border:1px solid #30363d;background:#0c1117;color:#e6edf3;font-size:12px;font-family:inherit;margin-bottom:12px;line-height:1.6;resize:vertical">'+escHtml(getRoleTemplate('other'))+'</textarea>'+
+'<label style="color:#fbbf24;font-size:12px;font-weight:600;display:block;margin-bottom:4px">👥 অন্যান্য কর্মী / All other employee</label><p style="color:#7d8590;font-size:10px;margin:0 0 4px">এডিটর, DOP/ক্যামেরা সহ বাকি সব কর্মী এই চুক্তিটিই দেখবে ও সই করবে।</p><textarea id="agrOther" style="width:100%;min-height:150px;padding:12px;border-radius:12px;border:1px solid #30363d;background:#0c1117;color:#e6edf3;font-size:12px;font-family:inherit;margin-bottom:12px;line-height:1.6;resize:vertical">'+escHtml(getRoleTemplate('other'))+'</textarea>'+
 '<button id="svAgr" class="btn bp">Save Templates 📝</button></div>'+
 '<div class="card"><h3 style="color:#00d4aa;font-size:14px;margin-bottom:6px">📕 Code of Conduct (PDF)</h3><p style="color:#7d8590;font-size:11px;margin-bottom:12px">একটি PDF আপলোড করো — প্রত্যেক স্টাফ নিজের লগইন থেকে এটা পড়তে ও ডাউনলোড করতে পারবে।</p>'+
 (S.coc?('<div style="padding:12px;border-radius:12px;background:#10b98115;border:1px solid #10b98133;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;gap:8px"><div style="min-width:0"><div style="color:#10b981;font-size:13px;font-weight:600">✅ Uploaded</div><div style="color:#7d8590;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+escHtml(S.coc.name||'code_of_conduct.pdf')+'</div></div><button id="cocView" class="btn bs" style="width:auto;padding:8px 14px;font-size:12px;color:#00d4aa;border-color:#00d4aa55">👁️ Preview</button></div>'):'<p style="color:#7d8590;font-size:12px;margin-bottom:12px">এখনো কোনো PDF আপলোড করা হয়নি।</p>')+
@@ -933,7 +957,32 @@ if(existing._id){adjRef.doc(existing._id).update(upd).then(function(){existing.p
 else{var data={empId:eid,year:String(salY),month:String(salM+1).padStart(2,'0'),overtime:0,fine:0,paid:false,paidDate:'',perfBonus:0,perfBonusPaid:newPerfPaid,perfBonusPaidDate:upd.perfBonusPaidDate};
 adjRef.add(data).then(function(doc){data._id=doc.id;ADJ[adjKey]=data;showToast('🎁 Bonus Paid!');render();}).catch(function(err){showToast('❌ '+(err.message||'Error'));});}
 };
-var dlBs=document.querySelectorAll('.dlE');for(var db2=0;db2<dlBs.length;db2++)dlBs[db2].onclick=function(){var eid=this.getAttribute('data-e');if(confirm('Delete korben?')){empRef.doc(eid).delete().then(function(){E=E.filter(function(x){return x.id!==eid;});showToast('🗑️ Deleted');render();});}};
+// Archive (employee left) — keeps all records
+var arBs=document.querySelectorAll('.arE');for(var ar2=0;ar2<arBs.length;ar2++)arBs[ar2].onclick=function(){
+var eid=this.getAttribute('data-e');
+var emp=null;for(var j=0;j<E.length;j++)if(E[j].id===eid){emp=E[j];break;}
+if(!emp)return;
+if(confirm('"'+emp.name+'" ke archive korben?\n\nList theke soriye jabe kintu sob purono record (attendance, salary, payslip, documents) safe thakbe.')){
+empRef.doc(eid).update({archived:true,archivedAt:Date.now()}).then(function(){emp.archived=true;emp.archivedAt=Date.now();showToast('🗄️ '+emp.name+' archived');render();}).catch(function(){showToast('❌ Error');});
+}};
+// Archive section toggle
+var archHdr=document.getElementById('archHdr');if(archHdr)archHdr.onclick=function(){archiveOpen=!archiveOpen;render();};
+// Restore from archive
+var rsBs=document.querySelectorAll('.restoreE');for(var rs2=0;rs2<rsBs.length;rs2++)rsBs[rs2].onclick=function(){
+var eid=this.getAttribute('data-e');
+var emp=null;for(var j=0;j<E.length;j++)if(E[j].id===eid){emp=E[j];break;}
+if(!emp)return;
+empRef.doc(eid).update({archived:false,archivedAt:firebase.firestore.FieldValue.delete()}).then(function(){emp.archived=false;delete emp.archivedAt;showToast('♻️ '+emp.name+' restored');render();}).catch(function(){showToast('❌ Error');});
+};
+// Permanent delete from archive — deletes employee + ALL records
+var pdBs=document.querySelectorAll('.permDelE');for(var pd2=0;pd2<pdBs.length;pd2++)pdBs[pd2].onclick=function(){
+var eid=this.getAttribute('data-e');
+var emp=null;for(var j=0;j<E.length;j++)if(E[j].id===eid){emp=E[j];break;}
+if(!emp)return;
+if(!confirm('⚠️ PERMANENT DELETE\n\n"'+emp.name+'" er employee record o tar SOMOSTO purono data (attendance, salary adjustment, salary history, agreement, documents, KYC) chiro-torre mache jabe. Eta ferano JABE NA.\n\nNiscit?'))return;
+if(!confirm('Sesh bar — "'+emp.name+'" ke permanent delete korte ki apni 100% niscit?'))return;
+permanentDeleteEmployee(eid,emp.name);
+};
 
 // Salary
 var sME=document.getElementById('sM');if(sME)sME.onchange=function(){salM=parseInt(this.value);loadAllSalHist(function(){loadRecsMonth(salY,salM,render);});};
@@ -1035,7 +1084,7 @@ var svS=document.getElementById('svS');if(svS)svS.onclick=function(){S.lat=parse
 var svCut=document.getElementById('svCut');if(svCut)svCut.onclick=function(){S.cutoffHr=parseInt(document.getElementById('cutH').value);S.cutoffMin=parseInt(document.getElementById('cutM').value);if(isNaN(S.cutoffHr)||S.cutoffHr<0||S.cutoffHr>23)S.cutoffHr=11;if(isNaN(S.cutoffMin)||S.cutoffMin<0||S.cutoffMin>59)S.cutoffMin=10;setRef.set(S,{merge:true}).then(function(){showToast('⏰ Cutoff saved: '+String(S.cutoffHr).padStart(2,'0')+':'+String(S.cutoffMin).padStart(2,'0'));});};
 var chP=document.getElementById('chPwd');if(chP)chP.onclick=function(){var np=document.getElementById('nPwd').value;if(!np||np.length<4)return showToast('Min 4 char!');S.adminPwd=np;setRef.set({adminPwd:np},{merge:true}).then(function(){showToast('🔐 Changed!');document.getElementById('nPwd').value='';});};
 var svAgr=document.getElementById('svAgr');if(svAgr)svAgr.onclick=function(){
-var t={editor:(document.getElementById('agrEditor')||{}).value||'',actor:(document.getElementById('agrActor')||{}).value||'',dop:(document.getElementById('agrDop')||{}).value||'',other:(document.getElementById('agrOther')||{}).value||''};
+var t={actor:(document.getElementById('agrActor')||{}).value||'',other:(document.getElementById('agrOther')||{}).value||''};
 S.agreementTemplates=t;showToast('💾 Saving...');
 setRef.set({agreementTemplates:t},{merge:true}).then(function(){showToast('✅ Templates saved!');}).catch(function(){showToast('❌ Error');});};
 var cocFile=document.getElementById('cocFile');if(cocFile)cocFile.onchange=function(){if(this.files&&this.files[0])uploadCoc(this.files[0]);};
@@ -1246,10 +1295,40 @@ reader.onerror=function(){cb(null);};reader.readAsDataURL(file);}catch(e){cb(nul
 function fmtDate(ts){try{var d=new Date(ts);return d.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+' '+d.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});}catch(e){return '';}}
 
 function loadStaffDocs(empId,cb){
-var done=0;function chk(){done++;if(done>=2&&cb)cb();}
+var done=0;function chk(){done++;if(done>=3&&cb)cb();}
 agrRef.doc(empId).get().then(function(d){if(d.exists)AGR[empId]=d.data();chk();}).catch(function(){chk();});
 kycRef.doc(empId).get().then(function(d){if(d.exists)KYC[empId]=d.data();chk();}).catch(function(){chk();});
-setTimeout(function(){if(done<2&&cb){done=2;cb();}},5000);
+cocSignRef.doc(empId).get().then(function(d){if(d.exists)COCSIGN[empId]=d.data();chk();}).catch(function(){chk();});
+setTimeout(function(){if(done<3&&cb){done=3;cb();}},6000);
+}
+
+/* ===== PERMANENT DELETE (from archive only) — removes employee + all records ===== */
+function permanentDeleteEmployee(eid,name){
+showToast('🗑️ Deleting all data...');
+var jobs=[];
+function delQuery(ref){return ref.get().then(function(s){var ds=[];s.forEach(function(d){ds.push(d.ref.delete().catch(function(){}));});return Promise.all(ds);}).catch(function(){});}
+function delStorage(meta){try{if(meta&&meta.path&&storage)return storage.ref(meta.path).delete().catch(function(){});}catch(e){}return Promise.resolve();}
+// Best-effort: delete sensitive storage files first
+var kyc=KYC[eid]||{};
+jobs.push(delStorage(kyc.aadhaar));jobs.push(delStorage(kyc.bank));
+var cs=COCSIGN[eid]||{};jobs.push(delStorage(cs));
+// Firestore record collections
+jobs.push(delQuery(recRef.where('empId','==',eid)));
+jobs.push(delQuery(adjRef.where('empId','==',eid)));
+jobs.push(delQuery(salHistRef.where('empId','==',eid)));
+jobs.push(delQuery(db.collection('lateAllow').where('empId','==',eid)));
+jobs.push(agrRef.doc(eid).delete().catch(function(){}));
+jobs.push(kycRef.doc(eid).delete().catch(function(){}));
+jobs.push(cocSignRef.doc(eid).delete().catch(function(){}));
+Promise.all(jobs).then(function(){
+empRef.doc(eid).delete().then(function(){
+E=E.filter(function(x){return x.id!==eid;});
+delete AGR[eid];delete KYC[eid];delete COCSIGN[eid];delete SALHIST[eid];
+for(var k in R){if(R[k]&&R[k].empId===eid)delete R[k];}
+for(var k2 in ADJ){if(k2.indexOf(eid+'_')===0)delete ADJ[k2];}
+showToast('🗑️ '+name+' o tar sob data delete holo');render();
+}).catch(function(){showToast('❌ Employee delete error');});
+});
 }
 
 function uploadKyc(type,file){
@@ -1284,6 +1363,150 @@ ref.put(file).then(function(){return ref.getDownloadURL();}).then(function(url){
 var meta={url:url,path:path,name:file.name,uploadedAt:Date.now()};
 setRef.set({coc:meta},{merge:true}).then(function(){S.coc=meta;showToast('✅ Code of Conduct uploaded!');render();}).catch(function(){showToast('❌ Save error');});
 }).catch(function(err){showToast('❌ Upload failed: '+((err&&(err.code||err.message))||'Storage off/rules'));});
+});
+}
+
+/* ===== IN-APP OVERLAY (no popup / no print-trap) ===== */
+function closeOverlay(){var o=document.getElementById('ovl');if(o&&o.parentNode)o.parentNode.removeChild(o);document.body.style.overflow='';}
+function openOverlay(title,bodyHtml,footerHtml){
+closeOverlay();
+var o=document.createElement('div');o.id='ovl';
+o.style.cssText='position:fixed;inset:0;z-index:99999;background:#0c1117;display:flex;flex-direction:column';
+var head='<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 16px;border-bottom:1px solid #30363d;background:#161b22;flex-shrink:0"><div style="font-size:15px;font-weight:700;color:#e6edf3;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+title+'</div><button id="ovlClose" style="background:#ff6b6b22;border:1px solid #ff6b6b55;color:#ff6b6b;font-size:14px;font-weight:700;padding:9px 18px;border-radius:10px;cursor:pointer;flex-shrink:0;font-family:inherit">✕ Close</button></div>';
+var body='<div style="flex:1;display:flex;flex-direction:column;min-height:0">'+bodyHtml+'</div>';
+var foot=footerHtml?('<div style="flex-shrink:0;padding:12px 16px;border-top:1px solid #30363d;background:#161b22">'+footerHtml+'</div>'):'';
+o.innerHTML=head+body+foot;
+document.body.appendChild(o);document.body.style.overflow='hidden';
+var cb=document.getElementById('ovlClose');if(cb)cb.onclick=function(){closeOverlay();};
+return o;
+}
+
+/* ===== LAZY PDF LIBS ===== */
+var _libP=null;
+function ensureAuthP(){return new Promise(function(res){ensureAuth(res);});}
+function loadScript(src){return new Promise(function(res,rej){var sc=document.createElement('script');sc.src=src;sc.onload=function(){res();};sc.onerror=function(){rej(new Error('load fail'));};document.head.appendChild(sc);});}
+function ensureBnFont(){
+if(!document.getElementById('bnFontLink')){var l=document.createElement('link');l.id='bnFontLink';l.rel='stylesheet';l.href='https://fonts.googleapis.com/css2?family=Noto+Sans+Bengali:wght@400;500;600;700&display=swap';document.head.appendChild(l);}
+try{return (document.fonts&&document.fonts.ready)?document.fonts.ready:Promise.resolve();}catch(e){return Promise.resolve();}
+}
+function ensurePdfLibs(){
+if(_libP)return _libP;
+_libP=Promise.resolve()
+.then(function(){return window.html2canvas?null:loadScript('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js');})
+.then(function(){return (window.jspdf&&window.jspdf.jsPDF)?null:loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');})
+.then(function(){return window.PDFLib?null:loadScript('https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js').catch(function(){});});
+return _libP;
+}
+function makePrintNode(innerHtml){
+var n=document.createElement('div');
+n.style.cssText='position:fixed;left:-10000px;top:0;width:794px;background:#ffffff;color:#111;font-family:"Noto Sans Bengali","Hind Siliguri",sans-serif;padding:48px 56px;box-sizing:border-box;line-height:1.7';
+n.innerHTML=innerHtml;document.body.appendChild(n);return n;
+}
+function nodeToPdf(node){
+return ensurePdfLibs().then(function(){return ensureBnFont();}).then(function(){
+return window.html2canvas(node,{scale:2,backgroundColor:'#ffffff',useCORS:true});
+}).then(function(canvas){
+var jsPDF=window.jspdf.jsPDF;var pdf=new jsPDF('p','mm','a4');
+var pw=pdf.internal.pageSize.getWidth(),ph=pdf.internal.pageSize.getHeight();
+var imgW=pw,imgH=canvas.height*imgW/canvas.width;
+if(imgH<=ph){pdf.addImage(canvas.toDataURL('image/jpeg',0.92),'JPEG',0,0,imgW,imgH);}
+else{var pagePx=Math.floor(canvas.width*ph/pw),pos=0,page=0;
+while(pos<canvas.height){var sliceH=Math.min(pagePx,canvas.height-pos);
+var c2=document.createElement('canvas');c2.width=canvas.width;c2.height=sliceH;
+c2.getContext('2d').drawImage(canvas,0,pos,canvas.width,sliceH,0,0,canvas.width,sliceH);
+if(page>0)pdf.addPage();
+pdf.addImage(c2.toDataURL('image/jpeg',0.92),'JPEG',0,0,imgW,sliceH*imgW/canvas.width);
+pos+=sliceH;page++;}}
+return pdf;
+});
+}
+
+/* ===== AGREEMENT (Task 3): in-app Read + Download (no print trap) ===== */
+function agreementDocHTML(rec){
+var body=escHtml(rec.agreementText).replace(/\n/g,'<br>');
+return '<div style="font-size:22px;font-weight:700;color:#0c7a5e;border-bottom:2px solid #0c7a5e;padding-bottom:8px">Ascent Digital Creation</div>'+
+'<div style="font-size:13px;color:#555;margin:4px 0 20px">Haringhata, Nadia, West Bengal</div>'+
+'<div style="font-size:15px;color:#111">'+body+'</div>'+
+'<div style="margin-top:28px;padding-top:14px;border-top:1px dashed #999;font-size:14px;color:#111"><b>Role:</b> '+escHtml(roleLabel(rec.role))+'<br><b>সই করার সময়:</b> '+escHtml(fmtDate(rec.signedAt))+'<br><b>Document ID:</b> '+escHtml(rec.agreementHash)+'</div>'+
+'<div style="margin-top:30px;font-size:15px;color:#111">স্বাক্ষরকারী (ডিজিটাল সম্মতি): <span style="display:inline-block;border-bottom:1px solid #111;padding:0 28px 2px;font-weight:700">'+escHtml(rec.signedName)+'</span><div style="font-size:11px;color:#777;margin-top:6px">✓ Information Technology Act, 2000 অনুযায়ী ইলেকট্রনিকভাবে গৃহীত</div></div>';
+}
+function readAgreement(rec){
+if(!rec)return;
+var body=escHtml(rec.agreementText).replace(/\n/g,'<br>');
+var inner='<div style="flex:1;overflow:auto;-webkit-overflow-scrolling:touch;padding:18px 18px 30px"><div style="max-width:760px;margin:0 auto;color:#c9d1d9;font-size:13.5px;line-height:1.8">'+
+'<div style="font-size:18px;font-weight:700;color:#00d4aa;margin-bottom:2px">Ascent Digital Creation</div>'+
+'<div style="font-size:11px;color:#7d8590;margin-bottom:16px">Haringhata, Nadia, West Bengal</div>'+
+'<div>'+body+'</div>'+
+'<div style="margin-top:22px;padding-top:14px;border-top:1px dashed #30363d;font-size:12.5px;color:#7d8590"><b style="color:#c9d1d9">Role:</b> '+escHtml(roleLabel(rec.role))+'<br><b style="color:#c9d1d9">সই:</b> '+escHtml(fmtDate(rec.signedAt))+'<br><b style="color:#c9d1d9">Document ID:</b> '+escHtml(rec.agreementHash)+'</div>'+
+'<div style="margin-top:18px;padding:14px;border-radius:12px;background:#10b98112;border:1px solid #10b98133;color:#e6edf3;font-size:13px">✍️ স্বাক্ষরকারী: <b>'+escHtml(rec.signedName)+'</b><div style="font-size:11px;color:#7d8590;margin-top:4px">✓ Information Technology Act, 2000 অনুযায়ী ইলেকট্রনিকভাবে গৃহীত</div></div>'+
+'</div></div>';
+openOverlay('📝 Signed Agreement',inner,'<button id="ovlDl" class="btn bp" style="margin:0">⬇️ Download PDF</button>');
+var dl=document.getElementById('ovlDl');if(dl)dl.onclick=function(){downloadAgreementPdf(rec);};
+}
+function downloadAgreementPdf(rec){
+if(!rec)return;showToast('⏳ PDF toiri hochhe...');
+var node=makePrintNode(agreementDocHTML(rec));
+nodeToPdf(node).then(function(pdf){pdf.save('Agreement_'+String(rec.signedName||'staff').replace(/\s+/g,'_')+'.pdf');if(node.parentNode)node.parentNode.removeChild(node);showToast('✅ Download shuru holo');})
+.catch(function(){if(node.parentNode)node.parentNode.removeChild(node);showToast('❌ PDF banate parlam na — internet check korun');});
+}
+
+/* ===== PDF viewer overlay (for original / signed COC) ===== */
+function readPdfUrl(title,url){
+var inner='<div style="flex:1;min-height:0;background:#525659"><iframe src="'+escHtml(url)+'" style="width:100%;height:100%;border:0;display:block"></iframe></div>';
+openOverlay(title,inner,'<a href="'+escHtml(url)+'" target="_blank" rel="noopener" class="btn bs" style="margin:0;text-decoration:none;display:block;text-align:center;color:#00d4aa;border-color:#00d4aa55">🔗 Browser e khulun / Download</a>');
+}
+
+/* ===== CODE OF CONDUCT E-SIGN (Task 4) ===== */
+function cocCertHTML(emp,name,ts){
+return '<div style="font-size:22px;font-weight:700;color:#0c7a5e;border-bottom:2px solid #0c7a5e;padding-bottom:8px">Ascent Digital Creation</div>'+
+'<div style="font-size:13px;color:#555;margin:4px 0 22px">Haringhata, Nadia, West Bengal</div>'+
+'<div style="font-size:18px;font-weight:700;color:#111;margin-bottom:14px">📕 Code of Conduct — সম্মতি ও স্বাক্ষর (I Agree &amp; Signed)</div>'+
+'<div style="font-size:15px;color:#111;line-height:1.9">আমি, <b>'+escHtml(name)+'</b>, নিশ্চিত করছি যে আমি Ascent Digital Creation-এর সম্পূর্ণ <b>Code of Conduct (আচরণবিধি)</b> পড়েছি, বুঝেছি এবং সম্পূর্ণভাবে মেনে চলতে স্বেচ্ছায় সম্মত হচ্ছি। আমি অঙ্গীকার করছি যে এই আচরণবিধির প্রতিটি নিয়ম আমি কর্মক্ষেত্রে পালন করব।</div>'+
+'<div style="margin-top:24px;padding:14px 16px;border:1px solid #ccc;border-radius:8px;background:#fafafa;font-size:14px;color:#111">'+
+'<div><b>নাম:</b> '+escHtml(name)+'</div><div style="margin-top:4px"><b>Role:</b> '+escHtml(roleLabel(emp.role||'other'))+'</div>'+
+'<div style="margin-top:4px"><b>মূল নথি:</b> '+escHtml((S.coc&&S.coc.name)||'code_of_conduct.pdf')+'</div><div style="margin-top:4px"><b>সই করার সময়:</b> '+escHtml(fmtDate(ts))+'</div></div>'+
+'<div style="margin-top:30px;font-size:15px;color:#111">স্বাক্ষরকারী (ডিজিটাল সম্মতি): <span style="display:inline-block;border-bottom:1px solid #111;padding:0 28px 2px;font-weight:700">'+escHtml(name)+'</span></div>'+
+'<div style="font-size:11px;color:#777;margin-top:8px">✓ Information Technology Act, 2000 অনুযায়ী এই ইলেকট্রনিক সম্মতি ও স্বাক্ষর আইনত বৈধ। এই পৃষ্ঠার সাথে মূল Code of Conduct সংযুক্ত করা হলো।</div>';
+}
+function mergeCocWithCert(cocUrl,certBytes){
+if(!window.PDFLib)return Promise.resolve(certBytes);
+return fetch(cocUrl).then(function(r){if(!r.ok)throw new Error('fetch');return r.arrayBuffer();}).then(function(cocBuf){
+var PD=window.PDFLib.PDFDocument;
+return PD.create().then(function(out){
+return PD.load(cocBuf).then(function(src){
+return out.copyPages(src,src.getPageIndices()).then(function(pgs){pgs.forEach(function(p){out.addPage(p);});
+return PD.load(certBytes).then(function(cert){return out.copyPages(cert,cert.getPageIndices()).then(function(cp){cp.forEach(function(p){out.addPage(p);});return out.save();});});});
+});});
+}).catch(function(){return certBytes;});
+}
+function uploadSignedCoc(bytes,nameVal,signedAt){
+return ensureAuthP().then(function(){
+var path='coc_signed/'+selE.id+'_'+signedAt+'.pdf';var ref=storage.ref(path);
+var blob=new Blob([bytes],{type:'application/pdf'});
+return ref.put(blob).then(function(){return ref.getDownloadURL();}).then(function(url){
+var rec={empId:selE.id,empName:selE.name,signedName:nameVal,signedAt:signedAt,url:url,path:path,name:'CodeOfConduct_signed_'+String(nameVal).replace(/\s+/g,'_')+'.pdf',cocName:(S.coc&&S.coc.name)||'code_of_conduct.pdf'};
+return cocSignRef.doc(selE.id).set(rec).then(function(){COCSIGN[selE.id]=rec;showToast('✅ Code of Conduct signed!');closeOverlay();render();});
+});
+});
+}
+function signCoc(){
+if(!selE)return;
+if(!(S.coc&&S.coc.url))return showToast('❌ Admin akhono COC upload koreni');
+var nameEl=document.getElementById('cocName'),consEl=document.getElementById('cocConsent');
+var nameVal=nameEl?nameEl.value.trim():'';var consent=consEl?consEl.checked:false;
+if(!consent)return showToast('❌ "I agree" box e tick din');
+if(!nameVal)return showToast('❌ Apnar pura naam likhun');
+if(!storage)return showToast('⚠️ Storage setup baki');
+showToast('⏳ Sign hochhe... kichu second wait korun');
+var signedAt=Date.now();
+var node=makePrintNode(cocCertHTML(selE,nameVal,signedAt));
+nodeToPdf(node).then(function(pdf){
+if(node.parentNode)node.parentNode.removeChild(node);
+var certBytes=pdf.output('arraybuffer');
+return mergeCocWithCert(S.coc.url,certBytes).then(function(finalBytes){return uploadSignedCoc(finalBytes,nameVal,signedAt);});
+}).catch(function(e){
+if(node&&node.parentNode)node.parentNode.removeChild(node);
+showToast('❌ Sign error — internet check kore abar try korun');
 });
 }
 
@@ -1331,7 +1554,7 @@ var h='<div style="padding:16px 20px 40px">';var role=selE.role||'other';var sig
 h+='<div class="card"><h3 style="color:#00d4aa;font-size:15px;margin-bottom:4px">📝 চুক্তি / Agreement</h3><div style="color:#7d8590;font-size:11px;margin-bottom:12px">Role: '+roleLabel(role)+'</div>';
 if(signed){
 h+='<div style="padding:16px;border-radius:12px;background:#10b98112;border:1px solid #10b98133;text-align:center"><div style="font-size:30px">✅</div><div style="color:#10b981;font-size:15px;font-weight:700;margin-top:6px">সই সম্পন্ন হয়েছে</div><div style="color:#e6edf3;font-size:13px;margin-top:4px">'+escHtml(signed.signedName)+'</div><div style="color:#7d8590;font-size:11px;margin-top:2px">'+fmtDate(signed.signedAt)+'</div></div>';
-h+='<button id="agrDownload" class="btn bp" style="margin-top:12px">📄 Download / Print korun</button>';
+h+='<div style="display:flex;gap:8px;margin-top:12px"><button id="agrRead" class="btn bp" style="flex:1;margin:0">👁️ Read</button><button id="agrDownload" class="btn bs" style="flex:1;margin:0;color:#00d4aa;border-color:#00d4aa55">⬇️ Download</button></div>';
 }else{
 h+='<div style="max-height:220px;overflow-y:auto;padding:14px;border-radius:12px;background:#0c1117;border:1px solid #30363d;font-size:12.5px;line-height:1.7;white-space:pre-wrap;color:#c9d1d9;margin-bottom:14px">'+escHtml(getRoleTemplate(role))+'</div>';
 h+='<input id="agrName" placeholder="আপনার পুরো নাম" value="'+escHtml(selE.name)+'">';
@@ -1345,32 +1568,55 @@ h+=fileRow('Aadhaar Card','🪪',kyc.aadhaar,'aadhaarFile','🔒 সুরক্
 h+=fileRow('Bank Proof (Passbook/Cheque)','🏦',kyc.bank,'bankFile','বেতন পাঠানোর জন্য — পাসবুকের প্রথম পাতা বা ক্যান্সেল চেকের ছবি।');
 h+='</div>';
 h+='<div class="card"><h3 style="color:#00d4aa;font-size:15px;margin-bottom:12px">📕 Code of Conduct</h3>';
-if(S.coc&&S.coc.url){h+='<p style="color:#7d8590;font-size:12px;margin-bottom:12px">কোম্পানির আচরণবিধি — পড়ুন ও নিজের কাছে রাখুন।</p><div style="display:flex;gap:8px"><button id="cocReadStaff" class="btn bp" style="flex:1">👁️ Read</button><button id="cocDlStaff" class="btn bs" style="flex:1;color:#00d4aa;border-color:#00d4aa55">⬇️ Download</button></div>';}
-else{h+='<p style="color:#7d8590;font-size:12px">এখনো Admin কোনো Code of Conduct আপলোড করেননি।</p>';}
+if(S.coc&&S.coc.url){
+var cocSigned=COCSIGN[selE.id];
+h+='<p style="color:#7d8590;font-size:12px;margin-bottom:10px">কোম্পানির আচরণবিধি পড়ুন এবং নিচে ইলেকট্রনিক সই করুন।</p>';
+h+='<div style="display:flex;gap:8px;margin-bottom:14px"><button id="cocReadStaff" class="btn bs" style="flex:1;margin:0;color:#00d4aa;border-color:#00d4aa55">👁️ মূল PDF পড়ুন</button></div>';
+if(cocSigned){
+h+='<div style="padding:16px;border-radius:12px;background:#10b98112;border:1px solid #10b98133;text-align:center"><div style="font-size:30px">✅</div><div style="color:#10b981;font-size:15px;font-weight:700;margin-top:6px">I Agree &amp; Signed</div><div style="color:#e6edf3;font-size:13px;margin-top:4px">'+escHtml(cocSigned.signedName)+'</div><div style="color:#7d8590;font-size:11px;margin-top:2px">'+fmtDate(cocSigned.signedAt)+'</div></div>';
+h+='<div style="display:flex;gap:8px;margin-top:12px"><button id="cocReadSigned" class="btn bp" style="flex:1;margin:0">👁️ Signed PDF পড়ুন</button><button id="cocDlSigned" class="btn bs" style="flex:1;margin:0;color:#00d4aa;border-color:#00d4aa55">⬇️ Download</button></div>';
+}else{
+h+='<div style="height:1px;background:#30363d;margin:4px 0 14px"></div>';
+h+='<label style="display:flex;align-items:flex-start;gap:10px;padding:12px;border-radius:12px;background:#161b22;border:1px solid #30363d;margin-bottom:12px;cursor:pointer"><input type="checkbox" id="cocConsent" style="width:20px;height:20px;margin:0;flex-shrink:0"><span style="font-size:12px;color:#c9d1d9;line-height:1.5">আমি উপরের সম্পূর্ণ Code of Conduct পড়েছি, বুঝেছি এবং মেনে চলতে স্বেচ্ছায় সম্মত হচ্ছি। <b>(I agree)</b></span></label>';
+h+='<div id="cocSignBox" style="display:none">';
+h+='<input id="cocName" placeholder="আপনার পুরো নাম" value="'+escHtml(selE.name)+'">';
+h+='<button id="cocSignBtn" class="btn bp" style="margin:0">✍️ সই করুন (Sign &amp; Generate PDF)</button>';
+h+='</div>';
+}
+}else{h+='<p style="color:#7d8590;font-size:12px">এখনো Admin কোনো Code of Conduct আপলোড করেননি।</p>';}
 h+='</div></div>';
 return h;
 }
 
 function bindStaffDocs(){
 var agrSign=document.getElementById('agrSign');if(agrSign)agrSign.onclick=function(){signAgreement();};
-var agrDl=document.getElementById('agrDownload');if(agrDl)agrDl.onclick=function(){printAgreement(AGR[selE.id]);};
+var agrRd=document.getElementById('agrRead');if(agrRd)agrRd.onclick=function(){readAgreement(AGR[selE.id]);};
+var agrDl=document.getElementById('agrDownload');if(agrDl)agrDl.onclick=function(){downloadAgreementPdf(AGR[selE.id]);};
 var af=document.getElementById('aadhaarFile');if(af)af.onchange=function(){if(this.files&&this.files[0])uploadKyc('aadhaar',this.files[0]);};
 var bf=document.getElementById('bankFile');if(bf)bf.onchange=function(){if(this.files&&this.files[0])uploadKyc('bank',this.files[0]);};
 var dv=document.querySelectorAll('.docView');for(var i=0;i<dv.length;i++)dv[i].onclick=function(){var u=this.getAttribute('data-url');if(u)window.open(u,'_blank');};
-var cr=document.getElementById('cocReadStaff');if(cr)cr.onclick=function(){if(S.coc&&S.coc.url)window.open(S.coc.url,'_blank');};
-var cd=document.getElementById('cocDlStaff');if(cd)cd.onclick=function(){if(S.coc&&S.coc.url)window.open(S.coc.url,'_blank');};
+// Code of Conduct
+var cr=document.getElementById('cocReadStaff');if(cr)cr.onclick=function(){if(S.coc&&S.coc.url)readPdfUrl('📕 Code of Conduct',S.coc.url);};
+var cc=document.getElementById('cocConsent');if(cc)cc.onchange=function(){var box=document.getElementById('cocSignBox');if(box)box.style.display=this.checked?'block':'none';};
+var csb=document.getElementById('cocSignBtn');if(csb)csb.onclick=function(){signCoc();};
+var crs=document.getElementById('cocReadSigned');if(crs)crs.onclick=function(){var c=COCSIGN[selE.id];if(c&&c.url)readPdfUrl('📕 Signed Code of Conduct',c.url);};
+var cds=document.getElementById('cocDlSigned');if(cds)cds.onclick=function(){var c=COCSIGN[selE.id];if(c&&c.url)window.open(c.url,'_blank');};
 }
 
 function showEmpDocs(empId){
 var emp=null;for(var i=0;i<E.length;i++)if(E[i].id===empId){emp=E[i];break;}
 if(!emp)return;var area=document.getElementById('eFA');if(!area)return;
 area.innerHTML='<div class="card" style="border-color:#00d4aa44;text-align:center"><div class="spin" style="margin:10px auto"></div><p style="color:#7d8590;font-size:12px">Loading docs...</p></div>';
-var agr=null,kyc={},done=0;
+var agr=null,kyc={},cocs=null,done=0;
 function finish(){
 var h='<div class="card" style="border-color:#00d4aa44"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><div><div style="font-size:16px;font-weight:700;color:#e6edf3">📄 '+escHtml(emp.name)+'</div><div style="color:#7d8590;font-size:11px">Role: '+roleLabel(emp.role||'other')+'</div></div><button id="docClose" class="btn bs" style="width:auto;padding:6px 12px;font-size:12px">✕ Close</button></div>';
 h+='<div style="padding:14px;border-radius:12px;border:1px solid '+(agr?'#10b98133':'#ff6b6b33')+';background:'+(agr?'#10b98110':'#ff6b6b10')+';margin-bottom:12px"><div style="font-size:13px;font-weight:600;color:#e6edf3;margin-bottom:6px">📝 Agreement</div>';
-if(agr){h+='<div style="color:#10b981;font-size:12px">✅ Signed — '+escHtml(agr.signedName)+'</div><div style="color:#7d8590;font-size:11px;margin-top:2px">'+fmtDate(agr.signedAt)+'</div><button id="docAgrView" class="btn bs" style="margin-top:10px;color:#00d4aa;border-color:#00d4aa55;font-size:12px;padding:8px">📄 View / Print</button>';}
+if(agr){h+='<div style="color:#10b981;font-size:12px">✅ Signed — '+escHtml(agr.signedName)+'</div><div style="color:#7d8590;font-size:11px;margin-top:2px">'+fmtDate(agr.signedAt)+'</div><button id="docAgrView" class="btn bs" style="margin-top:10px;color:#00d4aa;border-color:#00d4aa55;font-size:12px;padding:8px">📄 View</button>';}
 else{h+='<div style="color:#ff6b6b;font-size:12px">❌ Akhono sign koreni</div>';}
+h+='</div>';
+h+='<div style="padding:14px;border-radius:12px;border:1px solid '+(cocs?'#10b98133':'#30363d')+';background:'+(cocs?'#10b98110':'#161b22')+';margin-bottom:12px"><div style="font-size:13px;font-weight:600;color:#e6edf3;margin-bottom:6px">📕 Code of Conduct</div>';
+if(cocs){h+='<div style="color:#10b981;font-size:12px">✅ I Agree &amp; Signed — '+escHtml(cocs.signedName)+'</div><div style="color:#7d8590;font-size:11px;margin-top:2px">'+fmtDate(cocs.signedAt)+'</div><button data-url="'+escHtml(cocs.url)+'" class="adminDocView btn bs" style="margin-top:10px;color:#00d4aa;border-color:#00d4aa55;font-size:12px;padding:8px">📄 View signed</button>';}
+else{h+='<div style="color:#fbbf24;font-size:12px">⏳ Akhono CoC sign koreni</div>';}
 h+='</div>';
 h+=adminDocRow('🪪 Aadhaar',kyc.aadhaar);
 h+=adminDocRow('🏦 Bank Proof',kyc.bank);
@@ -1378,13 +1624,14 @@ h+='<div style="background:#fbbf2410;border:1px solid #fbbf2422;border-radius:10
 h+='</div>';
 area.innerHTML=h;
 var dc=document.getElementById('docClose');if(dc)dc.onclick=function(){area.innerHTML='';};
-var av=document.getElementById('docAgrView');if(av)av.onclick=function(){printAgreement(agr);};
+var av=document.getElementById('docAgrView');if(av)av.onclick=function(){readAgreement(agr);};
 var dvs=area.querySelectorAll('.adminDocView');for(var j=0;j<dvs.length;j++)dvs[j].onclick=function(){var u=this.getAttribute('data-url');if(u)window.open(u,'_blank');};
 }
-function chk(){done++;if(done>=2)finish();}
+function chk(){done++;if(done>=3)finish();}
 agrRef.doc(empId).get().then(function(d){if(d.exists)agr=d.data();chk();}).catch(function(){chk();});
 kycRef.doc(empId).get().then(function(d){if(d.exists)kyc=d.data();chk();}).catch(function(){chk();});
-setTimeout(function(){if(done<2){done=2;finish();}},5000);
+cocSignRef.doc(empId).get().then(function(d){if(d.exists)cocs=d.data();chk();}).catch(function(){chk();});
+setTimeout(function(){if(done<3){done=3;finish();}},6000);
 }
 function adminDocRow(label,meta){
 var h='<div style="padding:14px;border-radius:12px;border:1px solid '+(meta?'#10b98133':'#30363d')+';background:'+(meta?'#10b98110':'#161b22')+';margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;gap:8px"><div style="min-width:0"><div style="font-size:13px;font-weight:600;color:#e6edf3">'+label+'</div>';
