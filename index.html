@@ -17,6 +17,7 @@ body{color:#e6edf3;font-family:'Nunito Sans',system-ui,sans-serif;max-width:480p
 .df{font-family:'Playfair Display',Georgia,serif}
 input,select{width:100%;padding:13px 15px;border-radius:12px;border:1px solid #30363d;background:#161b22;color:#e6edf3;font-size:15px;margin-bottom:11px;outline:none;font-family:inherit;-webkit-appearance:none}
 input::placeholder{color:#7d8590}
+input[type=checkbox]{width:auto!important;min-width:0;padding:0;margin-bottom:0;border-radius:4px;-webkit-appearance:checkbox!important;-moz-appearance:checkbox!important;appearance:checkbox!important;accent-color:#00d4aa;cursor:pointer}
 select{-webkit-appearance:auto;appearance:auto}
 .btn{display:block;width:100%;padding:14px;border-radius:12px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;border:none;text-align:center;-webkit-tap-highlight-color:transparent;transition:opacity .2s}
 .btn:active{opacity:.8}
@@ -1266,7 +1267,7 @@ kycRef.doc(selE.id).set(upd,{merge:true}).then(function(){
 KYC[selE.id]=KYC[selE.id]||{};KYC[selE.id][type]=meta;
 showToast('✅ '+(type==='aadhaar'?'Aadhaar':'Bank proof')+' saved!');render();
 }).catch(function(){showToast('❌ Save error');});
-}).catch(function(){showToast('❌ Upload failed — Storage rules check korun');});
+}).catch(function(err){showToast('❌ Upload failed: '+((err&&(err.code||err.message))||'Storage off/rules'));});
 });};
 if(file.type&&file.type.indexOf('image')===0){compressImg(file,function(d){if(d)go(d,true);else showToast('❌ Image porte parlam na');});}
 else go(file,false);
@@ -1282,7 +1283,7 @@ var path='coc/code_of_conduct_'+Date.now()+'.pdf';var ref=storage.ref(path);
 ref.put(file).then(function(){return ref.getDownloadURL();}).then(function(url){
 var meta={url:url,path:path,name:file.name,uploadedAt:Date.now()};
 setRef.set({coc:meta},{merge:true}).then(function(){S.coc=meta;showToast('✅ Code of Conduct uploaded!');render();}).catch(function(){showToast('❌ Save error');});
-}).catch(function(){showToast('❌ Upload failed — Storage rules check korun');});
+}).catch(function(err){showToast('❌ Upload failed: '+((err&&(err.code||err.message))||'Storage off/rules'));});
 });
 }
 
