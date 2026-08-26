@@ -1039,43 +1039,109 @@ adjRef.add(data).then(function(doc){data._id=doc.id;ADJ[adjKey]=data;showToast('
 };
 
 // Salary Slip Download
+function numToWords(n){
+n=Math.round(n);if(n===0)return 'Zero';
+var ones=['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
+var tens=['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety'];
+function two(x){return x<20?ones[x]:tens[Math.floor(x/10)]+(x%10?' '+ones[x%10]:'');}
+function three(x){return x>99?ones[Math.floor(x/100)]+' Hundred'+(x%100?' '+two(x%100):''):two(x);}
+var out='';
+if(n>=10000000){out+=three(Math.floor(n/10000000))+' Crore ';n%=10000000;}
+if(n>=100000){out+=three(Math.floor(n/100000))+' Lakh ';n%=100000;}
+if(n>=1000){out+=three(Math.floor(n/1000))+' Thousand ';n%=1000;}
+if(n>0)out+=three(n);
+return out.trim();
+}
+function engRole(r){return r==='editor'?'Video Editor':r==='actor'?'Artist / Performer':r==='dop'?'DOP / Camera Operator':'Staff Member';}
 var slipBtns=document.querySelectorAll('.dlSlip');for(var sl=0;sl<slipBtns.length;sl++)slipBtns[sl].onclick=function(){
 var eid=this.getAttribute('data-eid');var emp=null;for(var j=0;j<E.length;j++)if(E[j].id===eid){emp=E[j];break;}
 if(!emp)return;
 var sc=calcSal(emp,salY,salM);
 var slipAdj=ADJ[eid+'_'+salY+'_'+salM]||{};
 var slipBonus=parseFloat(slipAdj.perfBonus)||0;
-var slip='╔══════════════════════════════════════╗\n';
-slip+='║     ASCENT DIGITAL CREATION          ║\n';
-slip+='║          SALARY SLIP                 ║\n';
-slip+='╠══════════════════════════════════════╣\n';
-slip+='║ Month  : '+mn[salM]+' '+salY+'                   \n';
-slip+='║ Name   : '+emp.name+'                     \n';
-slip+='║ Phone  : '+(emp.phone||'-')+'                    \n';
-slip+='╠══════════════════════════════════════╣\n';
-slip+='║ Total Days    : '+sc.totalDays+'                    \n';
-slip+='║ Sundays       : '+sc.sundays+'                     \n';
-slip+='║ Present       : '+sc.present+'                     \n';
-slip+='║ Half Day      : '+sc.half+'                      \n';
-slip+='║ Absent        : '+sc.absent+'                     \n';
-if(emp.salaryType==='monthly')slip+='║ Paid Sundays  : '+sc.paidSundays+'                     \n';
-slip+='║ Effective Days: '+(emp.salaryType==='monthly'?sc.effective:sc.effective)+'                   \n';
-slip+='╠══════════════════════════════════════╣\n';
-slip+='║ '+(emp.salaryType==='monthly'?'Monthly Salary : ₹'+emp.salary+' (÷30 per day)':'Daily Rate     : ₹'+emp.dailyRate)+'\n';
-if(emp.salaryType==='monthly'){var perD=Math.round(emp.salary/30);slip+='║ Per Day Rate   : ₹'+perD+' (salary÷30)        \n';
-slip+='║ Absent Deduct  : '+sc.absent+' days × ₹'+perD+'           \n';}
-slip+='║ Base Pay      : ₹'+sc.base.toLocaleString('en-IN')+'              \n';
-slip+='║ Overtime (+)  : ₹'+sc.overtime.toLocaleString('en-IN')+'              \n';
-slip+='║ Fine (-)      : ₹'+sc.fine.toLocaleString('en-IN')+'              \n';
-if(slipBonus>0)slip+='║ Perf Bonus(+) : ₹'+slipBonus.toLocaleString('en-IN')+(slipAdj.perfBonusPaid?' (Paid)':'')+'        \n';
-slip+='╠══════════════════════════════════════╣\n';
-slip+='║ NET PAYABLE   : ₹'+sc.net.toLocaleString('en-IN')+'              \n';
-if(slipBonus>0)slip+='║ + BONUS TOTAL : ₹'+(sc.net+slipBonus).toLocaleString('en-IN')+'              \n';
-slip+='╚══════════════════════════════════════╝\n';
-slip+='\nGenerated: '+new Date().toLocaleString('en-IN');
-var blob=new Blob([slip],{type:'text/plain'});var a=document.createElement('a');
-a.href=URL.createObjectURL(blob);a.download=emp.name.replace(/\s/g,'_')+'_salary_'+mn[salM]+'_'+salY+'.txt';a.click();
-showToast('📄 Slip downloaded!');
+var isMonthly=emp.salaryType==='monthly';
+var perD=isMonthly?Math.round((sc.monthlySal||emp.salary)/30):(sc.perDay||emp.dailyRate);
+var absDeduct=isMonthly?(sc.absent*perD)+(sc.half*Math.round(perD/2)):0;
+var grossEarn=sc.base+sc.overtime+slipBonus;
+var totalDeduct=sc.fine+(sc.otPaid?sc.overtime:0);
+var netPay=sc.net+slipBonus;
+var genDate=new Date();
+var slipNo='ADC/'+salY+'/'+String(salM+1).padStart(2,'0')+'/'+eid.substring(0,5).toUpperCase();
+var doc2='<!DOCTYPE html><html><head><meta charset="utf-8"><title>Salary Slip — '+escHtml(emp.name)+'</title>';
+doc2+='<style>';
+doc2+='*{margin:0;padding:0;box-sizing:border-box}';
+doc2+='body{font-family:Georgia,\'Times New Roman\',serif;background:#f4f4f4;padding:20px;color:#1a1a1a}';
+doc2+='.sheet{max-width:800px;margin:0 auto;background:#fff;padding:40px 45px;box-shadow:0 2px 12px rgba(0,0,0,0.15)}';
+doc2+='.lh{text-align:center;border-bottom:3px double #1a3c5e;padding-bottom:16px;margin-bottom:4px}';
+doc2+='.lh h1{font-size:26px;color:#1a3c5e;letter-spacing:2px;font-weight:700}';
+doc2+='.lh .sub{font-size:11px;color:#555;margin-top:4px;letter-spacing:0.5px}';
+doc2+='.ptitle{text-align:center;margin:14px 0;font-size:15px;font-weight:700;letter-spacing:3px;color:#1a3c5e;text-transform:uppercase;border:1px solid #1a3c5e;display:inline-block;padding:6px 26px}';
+doc2+='.pt-wrap{text-align:center}';
+doc2+='table{width:100%;border-collapse:collapse;margin-bottom:14px;font-size:12.5px}';
+doc2+='td,th{border:1px solid #999;padding:7px 10px;text-align:left;vertical-align:top}';
+doc2+='th{background:#eef2f6;font-weight:700;color:#1a3c5e}';
+doc2+='.noborder td{border:none;padding:3px 0}';
+doc2+='.amt{text-align:right;font-variant-numeric:tabular-nums}';
+doc2+='.net{background:#1a3c5e;color:#fff;font-size:14px;font-weight:700}';
+doc2+='.net td{border-color:#1a3c5e;color:#fff}';
+doc2+='.words{font-style:italic;font-size:12px;padding:8px 0 2px;color:#333}';
+doc2+='.sig{display:flex;justify-content:space-between;margin-top:60px}';
+doc2+='.sigbox{text-align:center;width:220px}';
+doc2+='.sigline{border-top:1.5px solid #333;padding-top:6px;font-size:12px;font-weight:600}';
+doc2+='.sigsub{font-size:10.5px;color:#666;margin-top:2px}';
+doc2+='.seal{width:110px;height:110px;border:1.5px dashed #aaa;border-radius:50%;margin:0 auto 8px;display:flex;align-items:center;justify-content:center;font-size:9px;color:#bbb;text-align:center}';
+doc2+='.foot{margin-top:28px;padding-top:10px;border-top:1px solid #ddd;font-size:9.5px;color:#888;display:flex;justify-content:space-between}';
+doc2+='.printbtn{position:fixed;top:14px;right:14px;padding:12px 22px;background:#1a3c5e;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.3);font-family:inherit}';
+doc2+='@media print{body{background:#fff;padding:0}.sheet{box-shadow:none;padding:20px 25px;max-width:100%}.printbtn{display:none}}';
+doc2+='@page{size:A4;margin:12mm}';
+doc2+='</style></head><body>';
+doc2+='<button class="printbtn" onclick="window.print()">🖨️ Print / Save PDF</button>';
+doc2+='<div class="sheet">';
+// Letterhead
+doc2+='<div class="lh"><h1>ASCENT DIGITAL CREATION</h1>';
+doc2+='<div class="sub">Digital Media &amp; Content Production House</div>';
+doc2+='<div class="sub">Haringhata, Nadia, West Bengal, India</div></div>';
+// Title
+doc2+='<div class="pt-wrap"><div class="ptitle">Salary Slip — '+mn[salM]+' '+salY+'</div></div>';
+// Employee info
+doc2+='<table><tr><th style="width:22%">Employee Name</th><td style="width:28%">'+escHtml(emp.name)+'</td><th style="width:22%">Slip No.</th><td style="width:28%">'+slipNo+'</td></tr>';
+doc2+='<tr><th>Designation</th><td>'+engRole(emp.role)+'</td><th>Pay Period</th><td>01 '+mn[salM]+' '+salY+' — '+sc.totalDays+' '+mn[salM]+' '+salY+'</td></tr>';
+doc2+='<tr><th>Contact</th><td>'+escHtml(emp.phone||'—')+'</td><th>Payment Mode</th><td>Cash / Bank Transfer</td></tr>';
+doc2+='<tr><th>Salary Type</th><td>'+(isMonthly?'Monthly (₹'+(sc.monthlySal||emp.salary).toLocaleString('en-IN')+'/month)':'Daily (₹'+perD.toLocaleString('en-IN')+'/day)')+'</td><th>Date of Issue</th><td>'+genDate.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+'</td></tr></table>';
+// Attendance
+doc2+='<table><tr><th colspan="'+(isMonthly?'7':'6')+'" style="text-align:center;background:#1a3c5e;color:#fff">ATTENDANCE SUMMARY</th></tr>';
+doc2+='<tr><th style="text-align:center">Total Days</th><th style="text-align:center">Sundays</th><th style="text-align:center">Present</th><th style="text-align:center">Half Day</th><th style="text-align:center">Absent</th>'+(isMonthly?'<th style="text-align:center">Paid Sundays</th>':'')+'<th style="text-align:center">Payable Days</th></tr>';
+doc2+='<tr><td style="text-align:center">'+sc.totalDays+'</td><td style="text-align:center">'+sc.sundays+'</td><td style="text-align:center">'+sc.present+'</td><td style="text-align:center">'+sc.half+'</td><td style="text-align:center">'+sc.absent+'</td>'+(isMonthly?'<td style="text-align:center">'+sc.paidSundays+'</td>':'')+'<td style="text-align:center;font-weight:700">'+(isMonthly?sc.effWithSun:sc.effective)+'</td></tr></table>';
+// Earnings & Deductions
+doc2+='<table><tr><th colspan="2" style="text-align:center;background:#1a3c5e;color:#fff;width:50%">EARNINGS</th><th colspan="2" style="text-align:center;background:#1a3c5e;color:#fff;width:50%">DEDUCTIONS</th></tr>';
+var earnRows=[],dedRows=[];
+earnRows.push(['Basic Pay ('+(isMonthly?'₹'+perD+' × payable days':'₹'+perD+' × '+sc.effective+' days')+')',sc.base]);
+if(sc.overtime>0)earnRows.push(['Overtime'+(sc.otPaid?' (paid separately)':''),sc.overtime]);
+if(slipBonus>0)earnRows.push(['Performance Bonus'+(slipAdj.perfBonusPaid?' (paid)':''),slipBonus]);
+if(isMonthly&&absDeduct>0)dedRows.push(['Absence / Half-day Adjustment*',0]);
+if(sc.fine>0)dedRows.push(['Fine / Penalty',sc.fine]);
+if(sc.otPaid&&sc.overtime>0)dedRows.push(['OT Paid Separately (adjusted)',sc.overtime]);
+var maxR=Math.max(earnRows.length,dedRows.length,1);
+for(var r2=0;r2<maxR;r2++){
+var eR=earnRows[r2],dR=dedRows[r2];
+doc2+='<tr><td>'+(eR?eR[0]:'')+'</td><td class="amt">'+(eR?'₹'+eR[1].toLocaleString('en-IN'):'')+'</td><td>'+(dR?dR[0]:'')+'</td><td class="amt">'+(dR&&dR[1]>0?'₹'+dR[1].toLocaleString('en-IN'):(dR?'—':''))+'</td></tr>';
+}
+doc2+='<tr><th>Gross Earnings</th><th class="amt">₹'+grossEarn.toLocaleString('en-IN')+'</th><th>Total Deductions</th><th class="amt">₹'+totalDeduct.toLocaleString('en-IN')+'</th></tr>';
+doc2+='<tr class="net"><td colspan="2">NET PAYABLE</td><td colspan="2" class="amt" style="font-size:16px">₹'+netPay.toLocaleString('en-IN')+'</td></tr></table>';
+doc2+='<div class="words">Amount in words: <strong>Rupees '+numToWords(netPay)+' Only</strong></div>';
+if(isMonthly&&absDeduct>0)doc2+='<div style="font-size:9.5px;color:#888;margin-top:4px">*Basic pay is computed on payable days; absence adjustment already reflected in Basic Pay.</div>';
+// Signatures
+doc2+='<div class="sig">';
+doc2+='<div class="sigbox"><div style="height:118px"></div><div class="sigline">Employee Signature</div><div class="sigsub">'+escHtml(emp.name)+'</div></div>';
+doc2+='<div class="sigbox"><div class="seal">COMPANY<br>SEAL</div><div style="height:0"></div><div class="sigline">Authorized Signatory</div><div class="sigsub">Ascent Digital Creation</div></div>';
+doc2+='</div>';
+// Footer
+doc2+='<div class="foot"><span>Slip No: '+slipNo+'</span><span>Generated: '+genDate.toLocaleString('en-IN')+'</span></div>';
+doc2+='</div></body></html>';
+var w2=window.open('','_blank');
+if(!w2){showToast('❌ Popup blocked! Browser settings check korun');return;}
+w2.document.write(doc2);w2.document.close();
+showToast('📄 Slip ready — Print/Save PDF korun');
 };
 
 // Settings
