@@ -23,7 +23,7 @@ select{-webkit-appearance:auto;appearance:auto}
 .btn:active{opacity:.8}
 .bp{background:#00d4aa;color:#0c1117}.bs{background:transparent;color:#7d8590;border:1px solid #30363d}
 .card{background:#161b22;border-radius:14px;padding:16px;border:1px solid #30363d;margin-bottom:12px}
-.toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%) translateY(80px);background:#161b22;color:#e6edf3;padding:12px 24px;border-radius:12px;border:1px solid #00d4aa;z-index:999;font-size:14px;opacity:0;transition:all .3s;white-space:nowrap;max-width:90%}
+.toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%) translateY(80px);background:#161b22;color:#e6edf3;padding:12px 24px;border-radius:12px;border:1px solid #00d4aa;z-index:999;font-size:14px;opacity:0;transition:all .3s;white-space:nowrap;max-width:90%;pointer-events:none}
 .toast.on{transform:translateX(-50%) translateY(0);opacity:1}
 .nav{position:fixed;bottom:0;left:0;right:0;max-width:480px;margin:0 auto;background:#161b22;border-top:1px solid #30363d;display:flex;justify-content:space-around;padding:8px 0 env(safe-area-inset-bottom,12px);z-index:100}
 .nav button{background:none;border:none;color:#7d8590;font-size:10px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px;font-family:inherit}
@@ -86,6 +86,7 @@ var E=[],R={},S={lat:22.5726,lng:88.3639,radius:200,adminPwd:'ascent2026'},ADJ={
 var AGR={},KYC={},COCSIGN={}; /* AGR[empId]=signed record, KYC[empId]={aadhaar,bank}, COCSIGN[empId]=signed coc */
 var archiveOpen=false;
 var loaded=false;
+var AUTO_ABS_DAYS=7; /* Auto-absent: aj (cutoff-er pore) + pichhoner 7 din (Sunday bad) er missing attendance Absent hobe */
 
 /* ===== AGREEMENT TEMPLATES (Bengali, admin-editable) ===== */
 function genTemplate(roleTitle,dutyLine){
@@ -129,11 +130,34 @@ function bn(){try{return new Date().toLocaleDateString('bn-IN',{weekday:'long',d
 function timeNow(){return new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});}
 var mn=['January','February','March','April','May','June','July','August','September','October','November','December'];
 
+/* ===================== DATA LAYER ===================== */
+function noop(){}
+function pad2(n){return String(n).padStart(2,'0');}
+function empById(id){for(var i=0;i<E.length;i++)if(E[i].id===id)return E[i];return null;}
+function fmtINR(n){return (Math.round((parseFloat(n)||0)*100)/100).toLocaleString('en-IN');}
+
+/* --- Attendance record: ek staff-er ek dine ekta-i record dhora hoy --- */
+function isAutoAbs(o){return !!o&&o.status==='absent'&&(o.auto===true||String(o.punchIn||'').indexOf('Auto-Absent')===0);}
+function putRec(o){
+if(!o||!o.empId||!o.date)return;
+var k=o.empId+'_'+o.date,ex=R[k];
+if(ex&&ex._id&&o._id&&ex._id!==o._id){
+var exA=isAutoAbs(ex),nA=isAutoAbs(o);
+/* Staff/Admin-er real record thakle, oi diner duplicate auto-absent muche dei */
+if(nA&&!exA){recRef.doc(o._id).delete().catch(noop);return;}
+if(exA&&!nA){recRef.doc(ex._id).delete().catch(noop);}
+}
+R[k]=o;
+}
+function dropRecs(fn){for(var k in R){if(R[k]&&fn(R[k]))delete R[k];}}
+function fillRecs(snap){snap.forEach(function(d){var o=d.data();o._id=d.id;putRec(o);});}
+function putAdj(d){var o=d.data();o._id=d.id;var yy=parseInt(o.year,10),mm=parseInt(o.month,10)-1;if(!o.empId||isNaN(yy)||isNaN(mm))return;ADJ[o.empId+'_'+yy+'_'+mm]=o;}
+
 function loadAll(cb){
 var done=0;function chk(){done++;if(done>=4){loaded=true;if(cb)cb();}}
 empRef.orderBy('name').get().then(function(s){E=[];s.forEach(function(d){var o=d.data();o.id=d.id;E.push(o);});chk();}).catch(function(){chk();});
 setRef.get().then(function(d){if(d.exists){var o=d.data();S.lat=o.lat||S.lat;S.lng=o.lng||S.lng;S.radius=o.radius||S.radius;S.adminPwd=o.adminPwd||S.adminPwd;if(o.cutoffHr!==undefined)S.cutoffHr=o.cutoffHr;if(o.cutoffMin!==undefined)S.cutoffMin=o.cutoffMin;if(o.agreementTemplates)S.agreementTemplates=o.agreementTemplates;if(o.coc)S.coc=o.coc;}chk();}).catch(function(){chk();});
-recRef.where('date','==',fd()).get().then(function(s){s.forEach(function(d){var o=d.data();o._id=d.id;R[o.empId+'_'+o.date]=o;});chk();}).catch(function(){chk();});
+loadRecsDate(fd(),chk);
 loadLateAllows(chk);
 setTimeout(function(){if(!loaded){loaded=true;if(cb)cb();else render();}},6000);
 }
@@ -142,14 +166,138 @@ function loadLateAllows(cb){
 db.collection('lateAllow').where('date','==',fd()).get().then(function(s){LATE={};s.forEach(function(d){var o=d.data();LATE[o.empId]=o.allowed;});if(cb)cb();}).catch(function(){if(cb)cb();});
 }
 
-function loadRecsDate(dt,cb){recRef.where('date','==',dt).get().then(function(s){s.forEach(function(d){var o=d.data();o._id=d.id;R[o.empId+'_'+o.date]=o;});if(cb)cb();}).catch(function(){if(cb)cb();});}
+function loadRecsDate(dt,cb){recRef.where('date','==',dt).get().then(function(s){dropRecs(function(o){return o.date===dt;});fillRecs(s);if(cb)cb();}).catch(function(){if(cb)cb();});}
 
 function loadRecsMonth(y,m,cb){
-var s2=y+'-'+String(m+1).padStart(2,'0')+'-01',e2=y+'-'+String(m+1).padStart(2,'0')+'-'+String(dim(y,m)).padStart(2,'0');
-recRef.where('date','>=',s2).where('date','<=',e2).get().then(function(s){s.forEach(function(d){var o=d.data();o._id=d.id;R[o.empId+'_'+o.date]=o;});
-adjRef.where('month','==',String(m+1).padStart(2,'0')).where('year','==',String(y)).get().then(function(as){as.forEach(function(ad){var ao=ad.data();ao._id=ad.id;ADJ[ao.empId+'_'+y+'_'+m]=ao;});if(cb)cb();}).catch(function(){if(cb)cb();});
+var pre=y+'-'+pad2(m+1)+'-';
+recRef.where('date','>=',pre+'01').where('date','<=',pre+pad2(dim(y,m))).get().then(function(s){
+dropRecs(function(o){return String(o.date).indexOf(pre)===0;});fillRecs(s);
+adjRef.where('month','==',pad2(m+1)).where('year','==',String(y)).get().then(function(as){as.forEach(putAdj);if(cb)cb();}).catch(function(){if(cb)cb();});
 }).catch(function(){if(cb)cb();});
 }
+
+/* Ek staff-er ek diner record (2 ta equality filter — kono extra index lage na) */
+function loadEmpDay(eid,dt,cb){recRef.where('empId','==',eid).where('date','==',dt).get().then(function(s){dropRecs(function(o){return o.empId===eid&&o.date===dt;});fillRecs(s);if(cb)cb();}).catch(function(){if(cb)cb();});}
+
+/* Ek staff-er sob attendance (History + Salary tab-er jonno, dorkar holei load hoy) */
+var _empRecsFor=null,_empRecsFailed=false;
+function loadEmpRecs(eid,cb){
+_empRecsFailed=false;
+recRef.where('empId','==',eid).get().then(function(s){dropRecs(function(o){return o.empId===eid;});fillRecs(s);_empRecsFor=eid;if(cb)cb();}).catch(function(){_empRecsFailed=true;if(cb)cb();});
+}
+function ensureEmpRecs(cb){if(!selE||_empRecsFor===selE.id){if(cb)cb();return;}loadEmpRecs(selE.id,cb);}
+function loadEmpAdj(eid,cb){adjRef.where('empId','==',eid).get().then(function(s){s.forEach(putAdj);if(cb)cb();}).catch(function(){if(cb)cb();});}
+
+/* ===================== ATTENDANCE CUTOFF ===================== */
+function cutoffHM(){var h=parseInt(S.cutoffHr,10),m=parseInt(S.cutoffMin,10);if(isNaN(h)||h<0||h>23)h=11;if(isNaN(m)||m<0||m>59)m=10;return {h:h,m:m};}
+function cutoffStr(){var c=cutoffHM();return pad2(c.h)+':'+pad2(c.m);}
+function isPastCutoff(d){d=d||new Date();var c=cutoffHM();return d.getHours()>c.h||(d.getHours()===c.h&&d.getMinutes()>=c.m);}
+
+/* ===================== AUTO ABSENT =====================
+   Cutoff time par hole jara attendance deyni (late-allow chhara) tader automatic Absent record toiri hoy.
+   Pichhoner AUTO_ABS_DAYS din-er missing din-o (Sunday bad) Absent hoye jay.
+   Doc ID fixed (auto_<empId>_<date>) — tai eki din dui device theke chalaleo duplicate hoy na.
+   Settings-e 'autoAbsentDone' marker rakhi, jate dine 2 bar-er beshi pura sweep na chole. */
+var _sweepBusy=false;
+function runAutoAbsent(force,cb){
+cb=cb||noop;
+if(_sweepBusy||!loaded){cb(null);return;}
+_sweepBusy=true;
+var now=new Date(),today=fd(now),afterCut=isPastCutoff(now),key=today+'_'+(afterCut?1:0);
+function fin(created){_sweepBusy=false;cb(created);}
+setRef.get().then(function(sd){
+var o0=(sd&&sd.exists)?(sd.data()||{}):{};
+var doneKey=o0.autoAbsentDone||'';
+if(!force&&(doneKey===key||doneKey===today+'_1')){fin(null);return;}
+var dates=[];
+for(var i=AUTO_ABS_DAYS;i>=0;i--){var dd=new Date(now.getFullYear(),now.getMonth(),now.getDate()-i);if(dd.getDay()===0)continue;if(i===0&&!afterCut)continue;dates.push(fd(dd));}
+var emps=activeE();
+if(!dates.length||!emps.length){setRef.set({autoAbsentDone:key},{merge:true}).catch(noop);fin(null);return;}
+var lo=dates[0],hi=dates[dates.length-1];
+loadLateAllows(function(){
+recRef.where('date','>=',lo).where('date','<=',hi).get().then(function(snap){
+dropRecs(function(o){return o.date>=lo&&o.date<=hi;});
+var have={};
+snap.forEach(function(d){var o=d.data();o._id=d.id;have[o.empId+'_'+o.date]=1;putRec(o);});
+var jobs=[],todayLbl='Auto-Absent ('+cutoffStr()+')';
+emps.forEach(function(emp){
+dates.forEach(function(dt){
+if(have[emp.id+'_'+dt])return;
+if(emp.joinedOn&&dt<emp.joinedOn)return;
+if(dt===today&&LATE[emp.id])return;
+jobs.push(writeAutoAbs(emp,dt,dt===today?todayLbl:'Auto-Absent (Not marked)'));
+});
+});
+Promise.all(jobs).then(function(res){
+var created={},n=0,fail=0;
+res.forEach(function(r){if(r){created[r]=true;n++;}else fail++;});
+if(!fail)setRef.set({autoAbsentDone:key},{merge:true}).catch(noop);
+fin(n?created:null);
+});
+}).catch(function(){fin(null);});
+});
+}).catch(function(){fin(null);});
+}
+function writeAutoAbs(emp,dt,label){
+var id='auto_'+emp.id+'_'+dt;
+var data={empId:emp.id,empName:emp.name||'',date:dt,status:'absent',punchIn:label,punchOut:'',auto:true,ts:firebase.firestore.FieldValue.serverTimestamp()};
+return recRef.doc(id).set(data).then(function(){data._id=id;putRec(data);return emp.id;}).catch(function(){return false;});
+}
+/* App khola thakle cutoff time-e nije theke auto-absent chalabe */
+var _cutTimer=null;
+function scheduleCutoffSweep(){
+if(_cutTimer){clearTimeout(_cutTimer);_cutTimer=null;}
+var now=new Date(),c=cutoffHM();
+var t=new Date(now.getFullYear(),now.getMonth(),now.getDate(),c.h,c.m,3);
+if(t.getTime()<=now.getTime())return;
+_cutTimer=setTimeout(function(){_cutTimer=null;onCutoffReached();},t.getTime()-now.getTime());
+}
+function onCutoffReached(){
+if(!mode||!loaded)return;
+if(mode==='staff'&&sStep==='mark'&&selE&&staffTab==='att'&&!R[selE.id+'_'+fd()])render();
+runAutoAbsent(false,function(created){
+if(!created)return;
+if(mode==='admin'&&(pg==='dash'||pg==='att'))render();
+else if(mode==='staff'&&sStep==='mark'&&selE&&created[selE.id]&&(staffTab==='att'||staffTab==='hist'))render();
+});
+}
+
+/* ===================== SALARY ADJUSTMENTS =====================
+   adjustments doc: fine, paid, paidDate, paidAmount, coreSalary, corePaid, perfBonus, perfBonusPaid ...
+   extras: [{id,title,amount,paid,paidDate,inSalary}]  <- OT / Bonus list (title soho)
+     paid     = alada (separately) pay kora hoyeche
+     inSalary = "Mark Salary Paid" korar somoy salary-r sathe pay hoyeche
+   Purono doc-e 'overtime' number thakle seta "Overtime" title-er ekta item hisebe dhora hoy. */
+function newXId(){return 'x'+Date.now().toString(36)+Math.random().toString(36).slice(2,7);}
+function normExtras(adj){
+adj=adj||{};
+var out=[];
+if(Array.isArray(adj.extras)){
+for(var i=0;i<adj.extras.length;i++){var x=adj.extras[i]||{};var amt=parseFloat(x.amount)||0;if(amt<=0)continue;
+out.push({id:String(x.id||('x'+i)),title:String(x.title||'').trim()||'OT / Bonus',amount:amt,paid:!!x.paid,paidDate:String(x.paidDate||''),inSalary:!!x.inSalary});}
+return out;
+}
+var ot=parseFloat(adj.overtime)||0;
+if(ot>0)out.push({id:'legacy',title:'Overtime',amount:ot,paid:!!adj.otPaid,paidDate:String(adj.otPaidDate||''),inSalary:!!adj.paid&&!adj.otPaid});
+return out;
+}
+/* Ek employee-r ek masher adjustment doc-e patch save (na thakle notun doc, fixed ID) */
+function adjWrite(eid,y,m,patch){
+var k=eid+'_'+y+'_'+m,ex=ADJ[k];
+if(ex&&ex._id){return adjRef.doc(ex._id).update(patch).then(function(){for(var p in patch)ex[p]=patch[p];return ex;});}
+var id=eid+'_'+y+'_'+pad2(m+1);
+var data={empId:eid,year:String(y),month:pad2(m+1)};
+for(var p in patch)data[p]=patch[p];
+return adjRef.doc(id).set(data,{merge:true}).then(function(){var cur=ADJ[k]||{};for(var q in data)cur[q]=data[q];cur._id=id;ADJ[k]=cur;return cur;});
+}
+var _adjBusy=false;
+function curAdjOf(eid){return ADJ[eid+'_'+salY+'_'+salM]||{};}
+function inputVal(cls,eid){var x=document.querySelector('.'+cls+'[data-eid="'+eid+'"]');return x?x.value:'';}
+function adjSave(eid,patch,okMsg){
+if(_adjBusy)return;_adjBusy=true;
+adjWrite(eid,salY,salM,patch).then(function(){_adjBusy=false;if(okMsg)showToast(okMsg);render();}).catch(function(err){_adjBusy=false;showToast('❌ '+((err&&err.message)||'Save failed'));});
+}
+
 
 /* Load salary history for ALL employees (needed for accurate getSalForMonth in admin salary page) */
 var _salHistLoaded=false;
@@ -214,20 +362,24 @@ app.innerHTML='<div style="min-height:100vh;display:flex;flex-direction:column;j
 '<button id="aLog" class="btn bp" style="margin-bottom:12px">Login →</button>'+
 '<button id="aBk" class="btn bs">← Back</button></div>'+
 '<p style="color:#7d8590;font-size:11px;margin-top:24px">Default: ascent2026</p></div>';
-document.getElementById('aLog').onclick=function(){if(document.getElementById('aPwd').value===S.adminPwd){mode='admin';pg='dash';render();}else showToast('❌ Wrong password!');};
+document.getElementById('aLog').onclick=function(){if(document.getElementById('aPwd').value===S.adminPwd){mode='admin';pg='dash';render();loadRecsDate(fd(),function(){if(mode==='admin'&&pg==='dash')render();runAutoAbsent(false,function(created){if(created&&mode==='admin'&&(pg==='dash'||pg==='att'))render();});});scheduleCutoffSweep();}else showToast('❌ Wrong password!');};
 document.getElementById('aBk').onclick=function(){mode=null;render();};
 document.getElementById('aPwd').addEventListener('keyup',function(e){if(e.key==='Enter')document.getElementById('aLog').click();});
 }
 
-/* ===== STAFF MODE ===== */
-var staffTab='att'; // 'att' or 'salary'
+/* ===================== STAFF MODE ===================== */
+var staffTab='att'; /* 'att' | 'hist' | 'salary' | 'docs' */
 var salaryPwdSet=false,salaryPwdInput='';
-var staffSalBdOpen=false; // toggle for salary breakdown in staff view
+var staffSalBdOpen=false; /* previous paid month-er breakdown toggle */
+var histY=null,histM=null; /* History tab-e kon mash dekhache */
+var _gmBusy=false,_lateFixBusy=false,_selfAbsBusy=false;
+var DAYN=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+function staffTabBtn(id,key,label){var on=staffTab===key;return '<button id="'+id+'" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:10px 4px;border-radius:10px;cursor:pointer;font-size:12px;font-weight:600;border:1px solid '+(on?'#00d4aa':'#30363d')+';background:'+(on?'#00d4aa22':'transparent')+';color:'+(on?'#00d4aa':'#7d8590')+';font-family:inherit">'+label+'</button>';}
+
 function rStaff(){
 document.getElementById('adminNav').style.display='none';
-var today=fd();
-var h='<div style="padding:16px 20px;border-bottom:1px solid #30363d;display:flex;align-items:center;gap:12px"><button id="sBack" style="background:none;border:none;color:#7d8590;font-size:22px;cursor:pointer">←</button><div><div style="font-size:17px;font-weight:600;color:#e6edf3">👤 '+(selE?selE.name:'Staff')+'</div></div></div>';
-
+var h='<div style="padding:16px 20px;border-bottom:1px solid #30363d;display:flex;align-items:center;gap:12px"><button id="sBack" style="background:none;border:none;color:#7d8590;font-size:22px;cursor:pointer">←</button><div><div style="font-size:17px;font-weight:600;color:#e6edf3">👤 '+(selE?escHtml(selE.name):'Staff')+'</div></div></div>';
 if(sStep==='pin'){
 h+='<div style="padding:24px 20px;text-align:center"><div style="width:72px;height:72px;border-radius:20px;background:#00d4aa22;margin:0 auto 16px;display:flex;align-items:center;justify-content:center;font-size:32px">🔐</div><h2 class="df" style="font-size:20px;margin-bottom:4px;color:#e6edf3">Apnar PIN Deen</h2><p style="color:#7d8590;font-size:13px;margin-bottom:28px">Nijer 4-digit PIN diye login korun</p><div style="display:flex;justify-content:center;gap:12px;margin-bottom:24px">';
 for(var d=0;d<4;d++)h+='<div style="width:48px;height:56px;border-radius:12px;border:2px solid '+(pin.length>d?'#00d4aa':'#30363d')+';background:'+(pin.length>d?'#00d4aa22':'#161b22')+';display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:700;color:#00d4aa">'+(pin[d]?'●':'')+'</div>';
@@ -235,20 +387,142 @@ h+='</div><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;ma
 var nums=[1,2,3,4,5,6,7,8,9,'',0,'del'];
 for(var n=0;n<nums.length;n++){if(nums[n]==='')h+='<div></div>';else h+='<button class="nB" data-v="'+nums[n]+'" style="padding:16px;font-size:22px;font-weight:600;border-radius:14px;border:1px solid #30363d;background:#161b22;color:#e6edf3;cursor:pointer">'+(nums[n]==='del'?'⌫':nums[n])+'</button>';}
 h+='</div><button id="vBtn" class="btn bp" style="margin-top:20px;opacity:'+(pin.length===4?1:.5)+'">Login →</button></div>';
-}else if(sStep==='mark'||sStep==='salary'){
-// Tab navigation
-h+='<div style="display:flex;gap:6px;padding:12px 20px"><button id="staffAttTab" style="flex:1;padding:10px 6px;border-radius:10px;cursor:pointer;font-size:12px;font-weight:600;border:1px solid '+(staffTab==='att'?'#00d4aa':'#30363d')+';background:'+(staffTab==='att'?'#00d4aa22':'transparent')+';color:'+(staffTab==='att'?'#00d4aa':'#7d8590')+';font-family:inherit">📋 Attendance</button><button id="staffSalTab" style="flex:1;padding:10px 6px;border-radius:10px;cursor:pointer;font-size:12px;font-weight:600;border:1px solid '+(staffTab==='salary'?'#00d4aa':'#30363d')+';background:'+(staffTab==='salary'?'#00d4aa22':'transparent')+';color:'+(staffTab==='salary'?'#00d4aa':'#7d8590')+';font-family:inherit">💰 Salary</button><button id="staffDocsTab" style="flex:1;padding:10px 6px;border-radius:10px;cursor:pointer;font-size:12px;font-weight:600;border:1px solid '+(staffTab==='docs'?'#00d4aa':'#30363d')+';background:'+(staffTab==='docs'?'#00d4aa22':'transparent')+';color:'+(staffTab==='docs'?'#00d4aa':'#7d8590')+';font-family:inherit">📄 Documents</button></div>';
+}else if((sStep==='mark'||sStep==='salary')&&selE){
+h+='<div style="display:flex;gap:6px;padding:12px 16px">'+staffTabBtn('staffAttTab','att','📋 Today')+staffTabBtn('staffHistTab','hist','📅 History')+staffTabBtn('staffSalTab','salary','💰 Salary')+staffTabBtn('staffDocsTab','docs','📄 Docs')+'</div>';
+if(staffTab==='docs')h+=staffDocsHTML();
+else if(staffTab==='salary')h+=staffSalaryHTML();
+else if(staffTab==='hist')h+=staffHistHTML();
+else h+=staffTodayHTML();
+}
+app.innerHTML=h;
+bindStaff();
+}
 
-if(staffTab==='docs'){
-h+=staffDocsHTML();
-}else if(staffTab==='salary'){
-// SALARY TAB - password protected
+/* ---------- TODAY TAB ---------- */
+function staffTodayHTML(){
+var today=fd(),key=selE.id+'_'+today,rec=R[key];
+var allowed=!!LATE[selE.id],auto=isAutoAbs(rec),cs=cutoffStr();
+if(allowed&&auto)return '<div class="loading" style="min-height:40vh"><div class="spin"></div><p style="color:#7d8590">Preparing...</p><button id="lateRecheck" class="btn bs" style="width:auto;padding:8px 16px;font-size:12px">🔄 Retry</button></div>';
+var late=isPastCutoff()&&!allowed;
+var h='<div style="padding:24px 20px;text-align:center"><div style="font-size:14px;color:#7d8590;margin-bottom:6px">'+bn()+'</div><div class="df" style="font-size:36px;font-weight:700;margin-bottom:4px;color:#e6edf3">'+timeNow()+'</div><div style="color:#00d4aa;font-size:13px;margin-bottom:6px">📍 Geo-fence: '+S.radius+'m</div><div style="color:#7d8590;font-size:11px;margin-bottom:24px">⏰ Deadline: '+cs+(allowed?' <span style="color:#10b981">✅ Admin Allowed</span>':'')+'</div>';
+if(rec&&!auto){
+var col=rec.status==='present'?'#10b981':rec.status==='half'?'#fbbf24':rec.status==='early'?'#f97316':'#ff6b6b',bg=rec.status==='present'?(rec.earlyTime?'#f9731622':'#10b98122'):rec.status==='half'?'#fbbf2422':rec.status==='early'?'#f9731622':'#ff6b6b22';
+if(rec.earlyTime){col='#f97316';bg='#f9731622';}
+h+='<div style="padding:24px;border-radius:20px;margin-bottom:20px;background:'+bg+';border:1px solid '+col+'44"><div style="font-size:48px">'+(rec.earlyHrs?'🚪':rec.status==='present'?'✅':rec.status==='half'?'🕐':'❌')+'</div><div style="font-size:18px;font-weight:700;margin-top:8px;color:'+col+'">'+(rec.earlyHrs?'Present + Early Leave ('+rec.earlyHrs+'hr)':rec.status==='present'?'Present':rec.status==='half'?'Half Day':'Absent')+'</div><div style="color:#7d8590;font-size:13px;margin-top:4px">'+(rec.status==='absent'?'Admin aj Absent mark korechen':'Ajker attendance deoa hoye geche')+'</div><div style="color:#7d8590;font-size:12px;margin-top:6px">In: '+escHtml(rec.punchIn||'-')+(rec.earlyHrs?' | EL: '+rec.earlyHrs+'hr @ '+escHtml(rec.earlyTime):'')+'</div></div>';
+if(rec.status==='present'&&!rec.earlyHrs)h+='<div style="margin-top:12px"><div style="color:#f97316;font-size:13px;font-weight:600;margin-bottom:8px">🚪 Early Leave?</div><div style="display:flex;gap:8px;align-items:center"><input id="elH" type="number" min="0" max="8" placeholder="Hours" style="margin:0;padding:10px;font-size:14px;flex:1"><input id="elM" type="number" min="0" max="59" placeholder="Min" style="margin:0;padding:10px;font-size:14px;flex:1"><button id="earlyBtn" class="btn bp" style="width:auto;padding:10px 16px;font-size:13px">Submit</button></div><div style="color:#7d8590;font-size:10px;margin-top:4px">Koto ghonta agee chole jacchen? (jemon: 2 hr 30 min)</div></div>';
+if(rec.earlyHrs){var elDed=rec.earlyHrs;h+='<div style="margin-top:12px;padding:12px;border-radius:12px;background:#f9731615;border:1px solid #f9731633"><div style="color:#f97316;font-size:13px;font-weight:600">🚪 Early Leave: '+elDed+' hrs deducted</div><div style="color:#7d8590;font-size:11px;margin-top:2px">Worked '+(8-elDed)+' hrs out of 8 hrs</div></div>';}
+}else if(rec||late){
+h+='<div style="padding:24px;border-radius:20px;margin-bottom:14px;background:#ff6b6b22;border:1px solid #ff6b6b44"><div style="font-size:48px">⛔</div><div style="font-size:18px;font-weight:700;margin-top:8px;color:#ff6b6b">Time Over — Aj Absent</div><div style="color:#7d8590;font-size:13px;margin-top:4px;line-height:1.5">'+cs+' er modhye attendance dite hoto, tai aj automatic Absent hoye geche</div><div style="color:#7d8590;font-size:12px;margin-top:6px">Admin ke bolun jodi special permission dorkar</div></div>';
+h+='<button id="lateRecheck" class="btn bs" style="font-size:13px;margin-bottom:6px">🔄 Admin allow koreche? Check korun</button>';
+}else{
+h+='<button id="mP" class="att-btn" style="background:#10b98122;border:1px solid #10b98144"><div style="font-size:36px">✅</div><div style="font-size:17px;font-weight:700;color:#10b981;margin-top:6px">Present</div></button>';
+h+='<button id="mH" class="att-btn" style="background:#fbbf2422;border:1px solid #fbbf2444"><div style="font-size:36px">🕐</div><div style="font-size:17px;font-weight:700;color:#fbbf24;margin-top:6px">Half Day</div></button>';
+}
+h+=staffExtrasTeaser();
+h+='</div>';
+return h;
+}
+
+/* Ei masher OT/Bonus — salary password thakle shudhu teaser (amount lukano), na thakle pura list */
+function staffExtrasTeaser(){
+var now=new Date(),adj=ADJ[selE.id+'_'+now.getFullYear()+'_'+now.getMonth()]||{};
+var items=normExtras(adj);if(!items.length)return '';
+if(selE.salaryPwd){
+return '<div id="xTeaser" style="margin-top:14px;padding:14px 16px;border-radius:14px;background:linear-gradient(135deg,#fbbf2410,#fbbf2405);border:1px solid #fbbf2433;text-align:center;cursor:pointer;animation:sparkle 2s ease-in-out infinite"><div style="display:inline-block;animation:starFloat 1.5s ease-in-out infinite;font-size:22px">✨</div><div style="color:#fbbf24;font-size:14px;font-weight:700;margin-top:4px">Awesome! Ei mashe apnar '+items.length+' ta OT/Bonus ache!</div><div style="color:#7d8590;font-size:11px;margin-top:4px">💰 Salary tab e details dekhun →</div></div>';
+}
+return '<div style="margin-top:14px;text-align:left">'+extrasCardHTML(items,!!adj.paid,'✨ Ei Masher OT / Bonus')+'</div>';
+}
+function extrasStatus(x,salaryPaid){
+if(x.paid)return {t:'✅ Alada paid'+(x.paidDate?' · '+x.paidDate:''),c:'#10b981'};
+if(x.inSalary&&salaryPaid)return {t:'✅ Salary-r sathe paid',c:'#10b981'};
+return {t:'⏳ Salary-r sathe pabe',c:'#fbbf24'};
+}
+function extrasCardHTML(items,salaryPaid,title){
+var tot=0;
+var h='<div style="padding:14px 16px;border-radius:14px;background:linear-gradient(135deg,#fbbf2410,#fbbf2405);border:1px solid #fbbf2433;margin-bottom:12px"><div style="color:#fbbf24;font-size:14px;font-weight:700;margin-bottom:6px">'+title+'</div>';
+for(var i=0;i<items.length;i++){var x=items[i],st=extrasStatus(x,salaryPaid);tot+=x.amount;
+h+='<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 0;'+(i<items.length-1?'border-bottom:1px solid #30363d66':'')+'"><div style="min-width:0"><div style="color:#e6edf3;font-size:13px;font-weight:600;word-break:break-word">'+escHtml(x.title)+'</div><div style="color:'+st.c+';font-size:10px;margin-top:2px">'+st.t+'</div></div><div style="color:#10b981;font-size:15px;font-weight:700;white-space:nowrap">+₹'+fmtINR(x.amount)+'</div></div>';}
+if(items.length>1)h+='<div style="display:flex;justify-content:space-between;padding-top:8px;margin-top:4px;border-top:1px solid #fbbf2433"><span style="color:#7d8590;font-size:12px">Total</span><span style="color:#fbbf24;font-size:15px;font-weight:700">₹'+fmtINR(tot)+'</span></div>';
+h+='</div>';
+return h;
+}
+
+/* ---------- HISTORY TAB ---------- */
+function dayInfo(emp,y,m,d,todayMid){
+var date=new Date(y,m,d),dt=y+'-'+pad2(m+1)+'-'+pad2(d),rec=R[emp.id+'_'+dt];
+var o={d:d,dt:dt,dow:date.getDay(),sun:date.getDay()===0,today:date.getTime()===todayMid.getTime(),future:date.getTime()>todayMid.getTime(),sub:'',icon:''};
+if(rec){
+if(rec.status==='present'){
+if(rec.earlyHrs){o.k='el';o.icon='🚪';o.label='Present + Early Leave ('+rec.earlyHrs+'h)';o.col='#f97316';}
+else{o.k='p';o.icon='✅';o.label='Present';o.col='#10b981';}
+o.sub=punchSub(rec);
+}else if(rec.status==='half'||rec.status==='early'){o.k='h';o.icon='🕐';o.label='Half Day';o.col='#fbbf24';o.sub=punchSub(rec);}
+else{o.k='a';o.icon='❌';o.col='#ff6b6b';if(isAutoAbs(rec)){o.label='Absent (Auto)';o.sub='Deadline-er modhye attendance deoa hoyni';}else{o.label='Absent';o.sub='Admin marked';}}
+}else if(o.future){o.k='f';o.label='—';o.col='#30363d';}
+else if(o.sun){o.k='s';o.icon='🔵';o.label='Sunday';o.col='#60a5fa';}
+else if(o.today&&(!isPastCutoff()||LATE[emp.id])){o.k='w';o.icon='⏳';o.label='Ekhono deoa hoyni';o.col='#7d8590';o.sub='Deadline: '+cutoffStr();}
+else{o.k='a';o.icon='❌';o.label='Absent';o.col='#ff6b6b';o.sub='Attendance deoa hoyni';}
+return o;
+}
+function punchSub(rec){
+var s='';
+if(rec.punchIn==='Manual')s='Admin marked';else if(rec.punchIn)s='In: '+rec.punchIn;
+if(rec.earlyHrs&&rec.earlyTime)s+=(s?' · ':'')+(rec.earlyTime==='Admin-set'?'Early leave admin set':'Left: '+rec.earlyTime);
+return s;
+}
+function navArrow(id,ch,en){return '<button id="'+id+'"'+(en?'':' disabled')+' style="width:46px;height:40px;border-radius:12px;border:1px solid #30363d;background:#161b22;color:'+(en?'#00d4aa':'#30363d')+';font-size:15px;cursor:'+(en?'pointer':'default')+';font-family:inherit;flex-shrink:0">'+ch+'</button>';}
+function sumCell(n,label,col){return '<div><div style="font-size:18px;font-weight:700;color:'+col+'">'+n+'</div><div style="font-size:9.5px;color:#7d8590;line-height:1.2;margin-top:2px">'+label+'</div></div>';}
+function staffHistHTML(){
+var now=new Date(),curVal=now.getFullYear()*12+now.getMonth();
+if(histY===null){histY=now.getFullYear();histM=now.getMonth();}
+var h='<div style="padding:4px 16px 40px">';
+if(_empRecsFor!==selE.id){
+h+='<div class="card" style="text-align:center;padding:30px 16px">';
+if(_empRecsFailed)h+='<div style="font-size:30px">⚠️</div><p style="color:#7d8590;font-size:13px;margin:8px 0 14px">History load hoyni — internet check korun</p><button id="histRetry" class="btn bp" style="width:auto;padding:10px 20px;margin:0 auto">🔄 Retry</button>';
+else h+='<div class="spin" style="margin:0 auto 12px"></div><p style="color:#7d8590;font-size:13px">History loading...</p>';
+return h+'</div></div>';
+}
+/* Koto purono mash dekha jabe: max 12 mash, ar staff-er prothom record-er mash-er age na */
+var firstVal=curVal;
+for(var k in R){var o=R[k];if(o&&o.empId===selE.id&&o.date){var p=String(o.date).split('-');var v=parseInt(p[0],10)*12+parseInt(p[1],10)-1;if(!isNaN(v)&&v<firstVal)firstVal=v;}}
+var lowVal=Math.max(curVal-11,firstVal);
+var val=histY*12+histM;if(val<lowVal)val=lowVal;if(val>curVal)val=curVal;
+histY=Math.floor(val/12);histM=val%12;
+var y=histY,m=histM;
+h+='<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin:4px 0 12px">'+navArrow('histPrev','◀',val>lowVal)+'<div style="text-align:center"><div class="df" style="font-size:19px;font-weight:700;color:#e6edf3">'+mn[m]+' '+y+'</div><div style="color:#7d8590;font-size:11px">'+(val===curVal?'Current Month':val===curVal-1?'Previous Month':'Purono Month')+'</div></div>'+navArrow('histNext','▶',val<curVal)+'</div>';
+var todayMid=new Date(now.getFullYear(),now.getMonth(),now.getDate());
+var days=dim(y,m),infos=[],c={p:0,h:0,a:0,el:0,s:0};
+for(var d=1;d<=days;d++){var inf=dayInfo(selE,y,m,d,todayMid);infos.push(inf);
+if(inf.future)continue;
+if(inf.sun){c.s++;continue;}
+if(inf.k==='p')c.p++;else if(inf.k==='el'){c.p++;c.el++;}else if(inf.k==='h')c.h++;else if(inf.k==='a')c.a++;}
+/* Summary */
+h+='<div class="card" style="display:grid;grid-template-columns:repeat(5,1fr);gap:4px;text-align:center;padding:12px 6px">'+sumCell(c.p,'Present','#10b981')+sumCell(c.h,'Half Day','#fbbf24')+sumCell(c.a,'Absent','#ff6b6b')+sumCell(c.el,'Early Leave','#f97316')+sumCell(c.s,'Sunday','#60a5fa')+'</div>';
+/* Calendar */
+var BG={p:'#10b98122',el:'#f9731622',h:'#fbbf2422',a:'#ff6b6b22',s:'#60a5fa14',w:'#7d859014',f:'transparent'};
+h+='<div class="card" style="padding:12px"><div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:6px">';
+var wl=['S','M','T','W','T','F','S'];for(var w=0;w<7;w++)h+='<div style="text-align:center;font-size:10px;font-weight:700;color:'+(w===0?'#60a5fa':'#7d8590')+'">'+wl[w]+'</div>';
+h+='</div><div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px">';
+var lead=new Date(y,m,1).getDay();for(var b=0;b<lead;b++)h+='<div></div>';
+for(var i=0;i<infos.length;i++){var f=infos[i];
+h+='<div style="height:44px;border-radius:9px;background:'+BG[f.k]+';border:'+(f.today?'2px solid #00d4aa':'1px solid '+(f.k==='f'?'#30363d55':f.col+'44'))+';display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px"><div style="font-size:12px;font-weight:700;color:'+(f.k==='f'?'#484f58':'#e6edf3')+'">'+f.d+'</div><div style="font-size:10px;line-height:1">'+(f.icon||'&nbsp;')+'</div></div>';}
+h+='</div><div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:10px;font-size:10px;color:#7d8590"><span>✅ Present</span><span>🕐 Half</span><span>🚪 Early Leave</span><span>❌ Absent</span><span>🔵 Sunday</span></div></div>';
+/* Din-wise list (notun din upore) */
+h+='<div class="card" style="padding:8px 14px"><div style="color:#e6edf3;font-size:14px;font-weight:700;padding:6px 0 8px">🗓️ Din-wise Details</div>';
+for(var j=infos.length-1;j>=0;j--){var g=infos[j];if(g.future)continue;
+h+='<div style="display:flex;align-items:center;gap:12px;padding:9px 4px;border-top:1px solid #30363d55'+(g.today?';background:#00d4aa0d;border-radius:8px':'')+'"><div style="width:40px;text-align:center;flex-shrink:0"><div style="font-size:16px;font-weight:700;color:'+(g.sun?'#60a5fa':'#e6edf3')+'">'+g.d+'</div><div style="font-size:9.5px;color:#7d8590">'+DAYN[g.dow]+(g.today?' · Aj':'')+'</div></div><div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:600;color:'+g.col+'">'+(g.icon?g.icon+' ':'')+escHtml(g.label)+'</div>'+(g.sub?'<div style="font-size:11px;color:#7d8590;margin-top:2px">'+escHtml(g.sub)+'</div>':'')+'</div></div>';}
+h+='</div></div>';
+return h;
+}
+
+/* ---------- SALARY TAB ---------- */
+function bdRow(label,val,col){return '<div style="display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid #30363d22"><span style="color:#7d8590;font-size:12px;min-width:0;word-break:break-word">'+label+'</span><span style="color:'+col+';font-size:13px;font-weight:600;white-space:nowrap">'+val+'</span></div>';}
+function staffSalaryHTML(){
 var salPwd=selE.salaryPwd||'';
 if(salPwd&&!salaryPwdSet){
-h+='<div style="padding:24px 20px;text-align:center"><div style="font-size:40px;margin-bottom:12px">🔒</div><h3 style="color:#e6edf3;margin-bottom:16px">Salary Protected</h3><input id="salPwdIn" type="password" placeholder="Salary password deen" style="text-align:center;font-size:16px"><button id="salPwdBtn" class="btn bp">Unlock 🔓</button></div>';
-}else{
-// Show salary info
-h+='<div style="padding:20px">';
+return '<div style="padding:24px 20px;text-align:center"><div style="font-size:40px;margin-bottom:12px">🔒</div><h3 style="color:#e6edf3;margin-bottom:16px">Salary Protected</h3><input id="salPwdIn" type="password" placeholder="Salary password deen" style="text-align:center;font-size:16px"><button id="salPwdBtn" class="btn bp">Unlock 🔓</button></div>';
+}
+var h='<div style="padding:20px">';
 // === CONGRATULATIONS - Salary Increment ===
 var hist=SALHIST[selE.id]||[];
 if(hist.length>0){var latest=hist[0];
@@ -270,17 +544,17 @@ if(efParts.length>=2){var eMi=mn.indexOf(efParts[0]);var eYi=parseInt(efParts[ef
 if(eMi===nowD.getMonth()&&eYi===nowD.getFullYear())showCongrats=true;}}
 if(showCongrats){
 var incAmt=latest.newSalary-latest.oldSalary;
-var incPct=Math.round((incAmt/latest.oldSalary)*100);
+var incPct=latest.oldSalary>0?Math.round((incAmt/latest.oldSalary)*100):0;
 h+='<div style="padding:20px 16px;border-radius:16px;background:linear-gradient(135deg,#fbbf2412,#fbbf2406,#00d4aa08);border:2px solid #fbbf2444;text-align:center;margin-bottom:16px;position:relative;overflow:hidden;animation:congratsGlow 2s ease-in-out infinite">';
 h+='<div style="position:absolute;top:6px;left:12px;animation:confettiFloat 2.5s ease-in-out infinite;font-size:16px">🎊</div>';
 h+='<div style="position:absolute;top:8px;right:14px;animation:confettiFloat 3s ease-in-out infinite 0.5s;font-size:16px">🎉</div>';
 h+='<div style="position:absolute;top:4px;left:50%;animation:confettiFloat 2s ease-in-out infinite 1s;font-size:14px">✨</div>';
 h+='<div style="font-size:28px;margin-bottom:6px;animation:starFloat 1.5s ease-in-out infinite">🎉</div>';
 h+='<div style="color:#fbbf24;font-size:20px;font-weight:700;letter-spacing:1px;animation:congratsBlink 1.5s ease-in-out infinite">🏆 CONGRATULATIONS! 🏆</div>';
-h+='<div style="color:#e6edf3;font-size:14px;margin-top:8px;line-height:1.6">Your salary has been increased from<br><span style="color:#ff6b6b;font-size:16px;font-weight:600;text-decoration:line-through">₹'+latest.oldSalary.toLocaleString('en-IN')+'</span> <span style="color:#7d8590;font-size:16px">→</span> <span style="color:#10b981;font-size:16px;font-weight:600">₹'+latest.newSalary.toLocaleString('en-IN')+'</span></div>';
-h+='<div style="margin-top:12px;padding:14px;background:#10b98115;border-radius:12px;border:1px solid #10b98133;animation:newSalPop 2s ease-in-out infinite"><div style="color:#7d8590;font-size:11px;margin-bottom:4px">NEW SALARY</div><div style="color:#10b981;font-size:40px;font-weight:700;font-family:Playfair Display,serif;letter-spacing:1px">₹'+latest.newSalary.toLocaleString('en-IN')+'</div><div style="color:#10b981;font-size:13px;margin-top:2px">'+(selE.salaryType==='monthly'?'per month':'per day')+'</div></div>';
-h+='<div style="display:inline-block;margin-top:10px;padding:6px 16px;border-radius:20px;background:#fbbf2422;border:1px solid #fbbf2433"><span style="color:#fbbf24;font-size:13px;font-weight:700">+₹'+incAmt.toLocaleString('en-IN')+' ('+incPct+'% increase)</span></div>';
-h+='<div style="color:#7d8590;font-size:12px;margin-top:8px">Effective from: '+latest.effectiveMonth+'</div>';
+h+='<div style="color:#e6edf3;font-size:14px;margin-top:8px;line-height:1.6">Your salary has been increased from<br><span style="color:#ff6b6b;font-size:16px;font-weight:600;text-decoration:line-through">₹'+fmtINR(latest.oldSalary)+'</span> <span style="color:#7d8590;font-size:16px">→</span> <span style="color:#10b981;font-size:16px;font-weight:600">₹'+fmtINR(latest.newSalary)+'</span></div>';
+h+='<div style="margin-top:12px;padding:14px;background:#10b98115;border-radius:12px;border:1px solid #10b98133;animation:newSalPop 2s ease-in-out infinite"><div style="color:#7d8590;font-size:11px;margin-bottom:4px">NEW SALARY</div><div style="color:#10b981;font-size:40px;font-weight:700;font-family:Playfair Display,serif;letter-spacing:1px">₹'+fmtINR(latest.newSalary)+'</div><div style="color:#10b981;font-size:13px;margin-top:2px">'+(selE.salaryType==='monthly'?'per month':'per day')+'</div></div>';
+h+='<div style="display:inline-block;margin-top:10px;padding:6px 16px;border-radius:20px;background:#fbbf2422;border:1px solid #fbbf2433"><span style="color:#fbbf24;font-size:13px;font-weight:700">+₹'+fmtINR(incAmt)+' ('+incPct+'% increase)</span></div>';
+h+='<div style="color:#7d8590;font-size:12px;margin-top:8px">Effective from: '+escHtml(latest.effectiveMonth)+'</div>';
 h+='</div>';
 }
 }
@@ -297,166 +571,177 @@ h+='<div style="position:absolute;top:6px;left:12px;animation:confettiFloat 2.5s
 h+='<div style="position:absolute;top:8px;right:14px;animation:confettiFloat 3s ease-in-out infinite 0.5s;font-size:16px">🎉</div>';
 h+='<div style="font-size:28px;margin-bottom:4px;animation:starFloat 1.5s ease-in-out infinite">🎁</div>';
 h+='<div style="color:#f472b6;font-size:18px;font-weight:700">Performance Bonus Paid! 🏆</div>';
-h+='<div style="color:#10b981;font-size:34px;font-weight:700;font-family:Playfair Display,serif;margin-top:6px">₹'+pbAmt.toLocaleString('en-IN')+'</div>';
+h+='<div style="color:#10b981;font-size:34px;font-weight:700;font-family:Playfair Display,serif;margin-top:6px">₹'+fmtINR(pbAmt)+'</div>';
 h+='<div style="color:#7d8590;font-size:12px;margin-top:4px">'+mn[pbM]+' '+pbY+' — '+(pbAdj.perfBonusPaidDate?'Paid on '+pbAdj.perfBonusPaidDate:'Paid')+'</div>';
 h+='</div>';
 }else{
 h+='<div style="padding:16px;border-radius:14px;background:linear-gradient(135deg,#f472b610,#f472b605);border:1px solid #f472b633;text-align:center;margin-bottom:16px;animation:sparkle 2s ease-in-out infinite">';
 h+='<div style="display:inline-block;animation:starFloat 1.5s ease-in-out infinite;font-size:22px">✨</div>';
-h+='<div style="color:#f472b6;font-size:15px;font-weight:700;margin-top:4px">Apni ₹'+pbAmt.toLocaleString('en-IN')+' Performance Bonus peyechen!</div>';
+h+='<div style="color:#f472b6;font-size:15px;font-weight:700;margin-top:4px">Apni ₹'+fmtINR(pbAmt)+' Performance Bonus peyechen!</div>';
 h+='<div style="color:#7d8590;font-size:11px;margin-top:4px">'+mn[pbM]+' '+pbY+' — shighroi paid hobe 🌟</div>';
 h+='</div>';
 }
 }
 // === CURRENT SALARY CARD ===
-h+='<div class="card" style="text-align:center"><div style="color:#7d8590;font-size:12px;margin-bottom:4px">Current Salary</div><div style="color:#00d4aa;font-size:36px;font-weight:700;font-family:Playfair Display,serif">₹'+(selE.salaryType==='monthly'?selE.salary.toLocaleString('en-IN'):selE.dailyRate.toLocaleString('en-IN'))+'</div><div style="color:#7d8590;font-size:12px;margin-top:4px">'+(selE.salaryType==='monthly'?'per month (÷30 per day basis)':'per day')+'</div></div>';
-// === PREVIOUS MONTH PAID STATUS (only 1 most recent, use stored paidAmount) ===
-var cm3=new Date().getMonth(),cy3=new Date().getFullYear();
+h+='<div class="card" style="text-align:center"><div style="color:#7d8590;font-size:12px;margin-bottom:4px">Current Salary</div><div style="color:#00d4aa;font-size:36px;font-weight:700;font-family:Playfair Display,serif">₹'+fmtINR(selE.salaryType==='monthly'?selE.salary:selE.dailyRate)+'</div><div style="color:#7d8590;font-size:12px;margin-top:4px">'+(selE.salaryType==='monthly'?'per month (÷30 per day basis)':'per day')+'</div></div>';
+// === EI MASHER OT / BONUS (title soho) ===
+var cNow=new Date(),cAdj=ADJ[selE.id+'_'+cNow.getFullYear()+'_'+cNow.getMonth()]||{};
+var cItems=normExtras(cAdj);
+if(cItems.length)h+=extrasCardHTML(cItems,!!cAdj.paid,'✨ '+mn[cNow.getMonth()]+' '+cNow.getFullYear()+' — OT / Bonus');
+// === PREVIOUS MONTH PAID STATUS (sob theke recent 1 ta, stored paidAmount) ===
+var cm3=cNow.getMonth(),cy3=cNow.getFullYear();
 var prevPaidAdj=null,prevPaidMonth=-1,prevPaidYear=-1;
-for(var pp=1;pp<=3;pp++){var ppM=(cm3-pp+12)%12;var ppY=cm3-pp<0?cy3-1:cy3;var ppK=selE.id+'_'+ppY+'_'+ppM;var ppA=ADJ[ppK]||{};
+for(var pp=1;pp<=3;pp++){var ppM=(cm3-pp+12)%12;var ppY=cm3-pp<0?cy3-1:cy3;var ppA=ADJ[selE.id+'_'+ppY+'_'+ppM]||{};
 if(ppA.paid){prevPaidAdj=ppA;prevPaidMonth=ppM;prevPaidYear=ppY;break;}}
 if(prevPaidAdj){
-// Use stored paidAmount if available, otherwise fallback to recalc
+var prevSc=calcSal(selE,prevPaidYear,prevPaidMonth);
 var mainAmt=parseFloat(prevPaidAdj.paidAmount)||0;
-if(mainAmt===0){var prevSc=calcSal(selE,prevPaidYear,prevPaidMonth);mainAmt=prevSc.net;}
+if(mainAmt===0)mainAmt=prevSc.net;
 var prevCoreSal=parseFloat(prevPaidAdj.coreSalary)||0;
 var prevCorePaid=prevPaidAdj.corePaid||false;
 var totalPaid=mainAmt+(prevCorePaid?prevCoreSal:0);
-// Main Paid Status Card (clickable for breakdown)
-h+='<div id="prevPaidCard" class="card" style="border-color:#10b98155;cursor:pointer;transition:all .2s"><div style="display:flex;align-items:center;gap:10px"><div style="width:36px;height:36px;border-radius:50%;background:#10b981;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">✓</div><div style="flex:1"><div style="color:#10b981;font-size:15px;font-weight:700">'+mn[prevPaidMonth]+' '+prevPaidYear+' — Salary Paid</div><div style="color:#e6edf3;font-size:20px;font-weight:700;font-family:Playfair Display,serif;margin-top:2px">₹'+mainAmt.toLocaleString('en-IN')+'</div></div><div style="color:#7d8590;font-size:18px" id="bdArrow">'+(staffSalBdOpen?'▲':'▼')+'</div></div>';
+h+='<div id="prevPaidCard" class="card" style="border-color:#10b98155;cursor:pointer;transition:all .2s"><div style="display:flex;align-items:center;gap:10px"><div style="width:36px;height:36px;border-radius:50%;background:#10b981;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">✓</div><div style="flex:1"><div style="color:#10b981;font-size:15px;font-weight:700">'+mn[prevPaidMonth]+' '+prevPaidYear+' — Salary Paid</div><div style="color:#e6edf3;font-size:20px;font-weight:700;font-family:Playfair Display,serif;margin-top:2px">₹'+fmtINR(mainAmt)+'</div></div><div style="color:#7d8590;font-size:18px" id="bdArrow">'+(staffSalBdOpen?'▲':'▼')+'</div></div>';
 if(staffSalBdOpen){
-var prevSc2=calcSal(selE,prevPaidYear,prevPaidMonth);
 h+='<div style="margin-top:14px;padding-top:14px;border-top:1px solid #30363d">';
-h+='<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #30363d22"><span style="color:#7d8590;font-size:12px">Present</span><span style="color:#10b981;font-size:13px;font-weight:600">'+prevSc2.present+' days</span></div>';
-h+='<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #30363d22"><span style="color:#7d8590;font-size:12px">Half Day</span><span style="color:#fbbf24;font-size:13px;font-weight:600">'+prevSc2.half+' days</span></div>';
-h+='<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #30363d22"><span style="color:#7d8590;font-size:12px">Absent</span><span style="color:#ff6b6b;font-size:13px;font-weight:600">'+prevSc2.absent+' days</span></div>';
-if(prevSc2.overtime>0)h+='<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #30363d22"><span style="color:#7d8590;font-size:12px">Overtime</span><span style="color:#10b981;font-size:13px;font-weight:600">+₹'+prevSc2.overtime.toLocaleString('en-IN')+'</span></div>';
-if(prevSc2.fine>0)h+='<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #30363d22"><span style="color:#7d8590;font-size:12px">Fine</span><span style="color:#ff6b6b;font-size:13px;font-weight:600">-₹'+prevSc2.fine.toLocaleString('en-IN')+'</span></div>';
-
+if(_empRecsFor===selE.id){
+h+=bdRow('Present',prevSc.present+' days','#10b981');
+h+=bdRow('Half Day',prevSc.half+' days','#fbbf24');
+h+=bdRow('Absent',prevSc.absent+' days','#ff6b6b');
+}
+for(var px=0;px<prevSc.extras.length;px++){var pX=prevSc.extras[px];h+=bdRow(escHtml(pX.title)+(pX.paid?' <span style="color:#10b981;font-size:10px">(alada paid)</span>':''),'+₹'+fmtINR(pX.amount),'#10b981');}
+if(prevSc.fine>0)h+=bdRow('Fine','-₹'+fmtINR(prevSc.fine),'#ff6b6b');
 h+='</div>';
 }
 h+='</div>';
-// Core Team Extra Salary (1 line, highlighted, for core members)
+// Core Team Extra Salary (core member-der jonno)
 if(selE.isCore&&prevCoreSal>0){
-h+='<div style="padding:14px 16px;border-radius:14px;background:#a78bfa15;border:1px solid #a78bfa44;display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><div style="display:flex;align-items:center;gap:8px"><span style="font-size:18px">⭐</span><span style="color:#a78bfa;font-size:14px;font-weight:700">Core Team Extra Salary</span></div><div style="display:flex;align-items:center;gap:8px"><span style="color:#e6edf3;font-size:20px;font-weight:700;font-family:Playfair Display,serif">₹'+prevCoreSal.toLocaleString('en-IN')+'</span><span style="font-size:16px">'+(prevCorePaid?'✅':'⏳')+'</span></div></div>';
-}
-// TOTAL SALARY (main + core)
-if(selE.isCore&&prevCoreSal>0){
-h+='<div style="padding:14px 16px;border-radius:14px;background:linear-gradient(135deg,#10b98115,#a78bfa08);border:2px solid #10b98144;text-align:center;margin-bottom:12px"><div style="color:#7d8590;font-size:11px;margin-bottom:4px">'+mn[prevPaidMonth]+' '+prevPaidYear+' — TOTAL</div><div style="color:#00d4aa;font-size:30px;font-weight:700;font-family:Playfair Display,serif">₹'+totalPaid.toLocaleString('en-IN')+'</div><div style="color:#7d8590;font-size:11px;margin-top:4px">Main ₹'+mainAmt.toLocaleString('en-IN')+' + Core ₹'+prevCoreSal.toLocaleString('en-IN')+'</div></div>';
+h+='<div style="padding:14px 16px;border-radius:14px;background:#a78bfa15;border:1px solid #a78bfa44;display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><div style="display:flex;align-items:center;gap:8px"><span style="font-size:18px">⭐</span><span style="color:#a78bfa;font-size:14px;font-weight:700">Core Team Extra Salary</span></div><div style="display:flex;align-items:center;gap:8px"><span style="color:#e6edf3;font-size:20px;font-weight:700;font-family:Playfair Display,serif">₹'+fmtINR(prevCoreSal)+'</span><span style="font-size:16px">'+(prevCorePaid?'✅':'⏳')+'</span></div></div>';
+h+='<div style="padding:14px 16px;border-radius:14px;background:linear-gradient(135deg,#10b98115,#a78bfa08);border:2px solid #10b98144;text-align:center;margin-bottom:12px"><div style="color:#7d8590;font-size:11px;margin-bottom:4px">'+mn[prevPaidMonth]+' '+prevPaidYear+' — TOTAL</div><div style="color:#00d4aa;font-size:30px;font-weight:700;font-family:Playfair Display,serif">₹'+fmtINR(totalPaid)+'</div><div style="color:#7d8590;font-size:11px;margin-top:4px">Main ₹'+fmtINR(mainAmt)+' + Core ₹'+fmtINR(prevCoreSal)+'</div></div>';
 }
 }
 // === SALARY HISTORY ===
 if(hist.length>0){
 h+='<div class="card"><h3 style="color:#e6edf3;font-size:14px;margin-bottom:12px">📊 Salary History</h3>';
 for(var sh=0;sh<hist.length;sh++){var hi=hist[sh];
-var hiInc=hi.newSalary-hi.oldSalary;var hiPct=Math.round((hiInc/hi.oldSalary)*100);
-h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;'+(sh<hist.length-1?'border-bottom:1px solid #30363d22':'')+'"><div><div style="color:#e6edf3;font-size:13px;font-weight:600">₹'+hi.oldSalary.toLocaleString('en-IN')+' → ₹'+hi.newSalary.toLocaleString('en-IN')+'</div><div style="color:#7d8590;font-size:11px;margin-top:2px">Effective: '+hi.effectiveMonth+'</div></div><div style="text-align:right"><div style="color:#10b981;font-size:13px;font-weight:700">+₹'+hiInc.toLocaleString('en-IN')+'</div><div style="color:#fbbf24;font-size:10px">+'+hiPct+'%</div></div></div>';}
+var hiInc=hi.newSalary-hi.oldSalary;var hiPct=hi.oldSalary>0?Math.round((hiInc/hi.oldSalary)*100):0;
+h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;'+(sh<hist.length-1?'border-bottom:1px solid #30363d22':'')+'"><div><div style="color:#e6edf3;font-size:13px;font-weight:600">₹'+fmtINR(hi.oldSalary)+' → ₹'+fmtINR(hi.newSalary)+'</div><div style="color:#7d8590;font-size:11px;margin-top:2px">Effective: '+escHtml(hi.effectiveMonth)+'</div></div><div style="text-align:right"><div style="color:#10b981;font-size:13px;font-weight:700">+₹'+fmtINR(hiInc)+'</div><div style="color:#fbbf24;font-size:10px">+'+hiPct+'%</div></div></div>';}
 h+='</div>';}
-// === PASSWORD (at very bottom) ===
+// === PASSWORD (sob niche) ===
 h+='<div class="card"><h3 style="color:#e6edf3;font-size:14px;margin-bottom:12px">🔐 Salary Password</h3><p style="color:#7d8590;font-size:11px;margin-bottom:8px">'+(salPwd?'Password set ache — change korte parben':'Password set korle onno keu dekhte parbe na')+'</p><input id="newSalPwd" type="password" placeholder="'+(salPwd?'New password':'Set password')+'"><button id="setSalPwd" class="btn bp">Save Password 🔐</button></div>';
 h+='</div>';
+return h;
 }
-}else{
-// ATTENDANCE TAB (existing mark logic)
-var key=selE.id+'_'+today,rec=R[key];
-var cutoff=S.cutoffHr||11,cutoffMin=S.cutoffMin||10;
-var now=new Date(),isLate=now.getHours()>cutoff||(now.getHours()===cutoff&&now.getMinutes()>=cutoffMin);
-var cutoffStr=String(cutoff).padStart(2,'0')+':'+String(cutoffMin).padStart(2,'0');
-var adminAllowed=LATE[selE.id]||false;
-if(adminAllowed)isLate=false;
-var isAutoAbsent=rec&&rec.status==='absent'&&rec.punchIn&&rec.punchIn.indexOf('Auto-Absent')!==-1;
-if(adminAllowed&&isAutoAbsent&&rec._id){
-recRef.doc(rec._id).delete().then(function(){delete R[key];render();});
-h+='<div class="loading"><div class="spin"></div><p style="color:#7d8590">Preparing...</p></div></div>';
-}else{
-var showRec=rec&&!isAutoAbsent;
-h+='<div style="padding:24px 20px;text-align:center"><div style="font-size:14px;color:#7d8590;margin-bottom:6px">'+bn()+'</div><div class="df" style="font-size:36px;font-weight:700;margin-bottom:4px;color:#e6edf3">'+timeNow()+'</div><div style="color:#00d4aa;font-size:13px;margin-bottom:6px">📍 Geo-fence: '+S.radius+'m</div><div style="color:#7d8590;font-size:11px;margin-bottom:24px">⏰ Deadline: '+cutoffStr+(adminAllowed?' <span style=color:#10b981>✅ Admin Allowed</span>':'')+'</div>';
-if(showRec){var col=rec.status==='present'?'#10b981':rec.status==='half'?'#fbbf24':rec.status==='early'?'#f97316':'#ff6b6b',bg=rec.status==='present'?(rec.earlyTime?'#f9731622':'#10b98122'):rec.status==='half'?'#fbbf2422':rec.status==='early'?'#f9731622':'#ff6b6b22';
-if(rec.earlyTime){col='#f97316';bg='#f9731622';}
-h+='<div style="padding:24px;border-radius:20px;margin-bottom:20px;background:'+bg+';border:1px solid '+col+'44"><div style="font-size:48px">'+(rec.earlyHrs?'🚪':rec.status==='present'?'✅':rec.status==='half'?'🕐':'❌')+'</div><div style="font-size:18px;font-weight:700;margin-top:8px;color:'+col+'">'+(rec.earlyHrs?'Present + Early Leave ('+rec.earlyHrs+'hr)':rec.status==='present'?'Present':rec.status==='half'?'Half Day':'Absent')+'</div><div style="color:#7d8590;font-size:13px;margin-top:4px">Ajker attendance deoa hoye geche</div><div style="color:#7d8590;font-size:12px;margin-top:6px">In: '+(rec.punchIn||'-')+(rec.earlyHrs?' | EL: '+rec.earlyHrs+'hr @ '+rec.earlyTime:'')+'</div></div>';
-if(rec.status==='present'&&!rec.earlyHrs)h+='<div style="margin-top:12px"><div style="color:#f97316;font-size:13px;font-weight:600;margin-bottom:8px">🚪 Early Leave?</div><div style="display:flex;gap:8px;align-items:center"><input id="elH" type="number" min="0" max="8" placeholder="Hours" style="margin:0;padding:10px;font-size:14px;flex:1"><input id="elM" type="number" min="0" max="59" placeholder="Min" style="margin:0;padding:10px;font-size:14px;flex:1"><button id="earlyBtn" class="btn bp" style="width:auto;padding:10px 16px;font-size:13px">Submit</button></div><div style="color:#7d8590;font-size:10px;margin-top:4px">Koto ghonta agee chole jacchen? (jemon: 2 hr 30 min)</div></div>';
-if(rec.earlyHrs){var elDed=rec.earlyHrs;h+='<div style="margin-top:12px;padding:12px;border-radius:12px;background:#f9731615;border:1px solid #f9731633"><div style="color:#f97316;font-size:13px;font-weight:600">🚪 Early Leave: '+elDed+' hrs deducted</div><div style="color:#7d8590;font-size:11px;margin-top:2px">Worked '+(8-elDed)+' hrs out of 8 hrs</div></div>';}
-}else if(isLate){
-h+='<div style="padding:24px;border-radius:20px;margin-bottom:20px;background:#ff6b6b22;border:1px solid #ff6b6b44"><div style="font-size:48px">⛔</div><div style="font-size:18px;font-weight:700;margin-top:8px;color:#ff6b6b">Time Over!</div><div style="color:#7d8590;font-size:13px;margin-top:4px">'+cutoffStr+' er modhye attendance dite hoto</div><div style="color:#7d8590;font-size:12px;margin-top:6px">Admin ke bolun jodi special permission dorkar</div></div>';
-var absData={empId:selE.id,empName:selE.name,date:fd(),status:'absent',punchIn:'Auto-Absent ('+cutoffStr+')',punchOut:'',ts:firebase.firestore.FieldValue.serverTimestamp()};
-if(!isAutoAbsent&&!rec)recRef.add(absData).then(function(doc){absData._id=doc.id;R[selE.id+'_'+fd()]=absData;});
-}else{
-h+='<button id="mP" class="att-btn" style="background:#10b98122;border:1px solid #10b98144"><div style="font-size:36px">✅</div><div style="font-size:17px;font-weight:700;color:#10b981;margin-top:6px">Present</div></button>';
-h+='<button id="mH" class="att-btn" style="background:#fbbf2422;border:1px solid #fbbf2444"><div style="font-size:36px">🕐</div><div style="font-size:17px;font-weight:700;color:#fbbf24;margin-top:6px">Half Day</div></button>';}
-}
-// SALARY PAID STATUS - simplified (only last 1 month)
-var cm=new Date().getMonth(),cy=new Date().getFullYear();
-var staffSal=calcSal(selE,cy,cm);
-if(staffSal.overtime>0&&!staffSal.otPaid){
-h+='<div style="margin-top:14px;padding:14px 16px;border-radius:14px;background:linear-gradient(135deg,#fbbf2410,#fbbf2405);border:1px solid #fbbf2433;text-align:center;animation:sparkle 2s ease-in-out infinite"><div style="display:inline-block;animation:starFloat 1.5s ease-in-out infinite;font-size:22px">✨</div><div style="color:#fbbf24;font-size:14px;font-weight:700;margin-top:4px">Awesome! You have ₹'+staffSal.overtime.toLocaleString('en-IN')+' Bonus this month!</div><div style="color:#7d8590;font-size:10px;margin-top:4px">Included in your salary 🌟</div></div>';}
-else if(staffSal.overtime>0&&staffSal.otPaid){
-h+='<div style="margin-top:14px;padding:14px 16px;border-radius:14px;background:linear-gradient(135deg,#10b98110,#10b98105);border:1px solid #10b98133;text-align:center"><div style="font-size:18px">💸</div><div style="color:#10b981;font-size:14px;font-weight:700;margin-top:4px">₹'+staffSal.overtime.toLocaleString('en-IN')+' Bonus already paid!</div><div style="color:#7d8590;font-size:10px;margin-top:4px">Separately paid — not in salary</div></div>';}
-h+='</div>';
-} // close attendance tab else
-} // close mark/salary step
 
-app.innerHTML=h;
-document.getElementById('sBack').onclick=function(){if(sStep==='pin'){mode=null;sStep='sel';selE=null;pin='';render();}else{sStep='pin';staffTab='att';salaryPwdSet=false;selE=null;pin='';render();}};
-
-// Tab switching
-var attTab=document.getElementById('staffAttTab');if(attTab)attTab.onclick=function(){staffTab='att';staffSalBdOpen=false;render();};
-var salTab=document.getElementById('staffSalTab');if(salTab)salTab.onclick=function(){staffTab='salary';salaryPwdSet=false;staffSalBdOpen=false;
-// Load salary history
-salHistRef.where('empId','==',selE.id).get().then(function(s){var arr=[];s.forEach(function(d){var o=d.data();o._id=d.id;arr.push(o);});arr.sort(function(a,b){var ta=a.createdAt?((typeof a.createdAt.toDate==='function')?a.createdAt.toDate().getTime():((a.createdAt.seconds||0)*1000)):0;var tb=b.createdAt?((typeof b.createdAt.toDate==='function')?b.createdAt.toDate().getTime():((b.createdAt.seconds||0)*1000)):0;return tb-ta;});SALHIST[selE.id]=arr;render();}).catch(function(){render();});
-};
-var docsTab=document.getElementById('staffDocsTab');if(docsTab)docsTab.onclick=function(){staffTab='docs';showToast('📄 Loading...');loadStaffDocs(selE.id,function(){render();});};
-bindStaffDocs();
-// Salary password
-var salPwdBtn=document.getElementById('salPwdBtn');if(salPwdBtn)salPwdBtn.onclick=function(){var inp=document.getElementById('salPwdIn').value;if(inp===selE.salaryPwd){salaryPwdSet=true;render();}else showToast('❌ Wrong password!');};
-var setSalPwd=document.getElementById('setSalPwd');if(setSalPwd)setSalPwd.onclick=function(){var np=document.getElementById('newSalPwd').value;if(!np||np.length<4)return showToast('Min 4 char!');empRef.doc(selE.id).update({salaryPwd:np}).then(function(){selE.salaryPwd=np;showToast('🔐 Password saved!');render();});};
-// Previous paid card toggle
-var prevCard=document.getElementById('prevPaidCard');if(prevCard)prevCard.onclick=function(){staffSalBdOpen=!staffSalBdOpen;render();};
+/* ---------- STAFF EVENTS ---------- */
+function bindStaff(){
+var el;
+el=document.getElementById('sBack');if(el)el.onclick=function(){if(sStep==='pin'){mode=null;sStep='sel';selE=null;pin='';render();}else{sStep='pin';staffTab='att';salaryPwdSet=false;staffSalBdOpen=false;selE=null;pin='';render();}};
 var nBs=document.querySelectorAll('.nB');for(var nb=0;nb<nBs.length;nb++)nBs[nb].onclick=function(){var v=this.getAttribute('data-v');if(v==='del')pin=pin.slice(0,-1);else if(pin.length<4)pin+=v;render();};
-var vB=document.getElementById('vBtn');if(vB)vB.onclick=function(){
-if(pin.length!==4)return showToast('4 digit PIN deen');
-var matches=[];for(var mi=0;mi<E.length;mi++){if(!E[mi].archived&&E[mi].pin&&String(E[mi].pin)===pin)matches.push(E[mi]);}
-if(matches.length===0){showToast('❌ Bhul PIN!');pin='';render();return;}
-if(matches.length>1){showToast('⚠️ Ekadhik staff er PIN eki rokom — Admin ke unique PIN set korte bolun');pin='';render();return;}
-selE=matches[0];
-sStep='mark';showToast('💰 Loading...');
-var cm2=new Date().getMonth(),cy2=new Date().getFullYear();
-loadLateAllows(function(){
-loadRecsMonth(cy2,cm2,function(){
-var done2=0;function chk2(){done2++;if(done2>=2)render();}
-for(var pp=1;pp<=2;pp++){(function(p){var pM=(cm2-p+12)%12;var pY=cm2-p<0?cy2-1:cy2;
-adjRef.where('month','==',String(pM+1).padStart(2,'0')).where('year','==',String(pY)).get().then(function(as){as.forEach(function(ad){var ao=ad.data();ao._id=ad.id;ADJ[ao.empId+'_'+pY+'_'+pM]=ao;});chk2();}).catch(function(){chk2();});
-})(pp);}
-});});};
-var mP=document.getElementById('mP');if(mP)mP.onclick=function(){doGM('present');};
-var mH=document.getElementById('mH');if(mH)mH.onclick=function(){doGM('half');};
-// Early leave handler - hours input
-var earlyBtn=document.getElementById('earlyBtn');if(earlyBtn)earlyBtn.onclick=function(){
+el=document.getElementById('vBtn');if(el)el.onclick=staffLogin;
+if(!selE||sStep==='pin')return;
+// Tabs
+el=document.getElementById('staffAttTab');if(el)el.onclick=function(){staffTab='att';staffSalBdOpen=false;render();};
+el=document.getElementById('staffHistTab');if(el)el.onclick=function(){staffTab='hist';staffSalBdOpen=false;render();var me=selE;if(_empRecsFor!==me.id)ensureEmpRecs(function(){if(selE===me&&staffTab==='hist')render();});};
+el=document.getElementById('staffSalTab');if(el)el.onclick=function(){openStaffSalary();};
+el=document.getElementById('staffDocsTab');if(el)el.onclick=function(){staffTab='docs';showToast('📄 Loading...');loadStaffDocs(selE.id,function(){render();});};
+// Today
+el=document.getElementById('mP');if(el)el.onclick=function(){doGM('present');};
+el=document.getElementById('mH');if(el)el.onclick=function(){doGM('half');};
+el=document.getElementById('earlyBtn');if(el)el.onclick=function(){
 var elH=parseFloat(document.getElementById('elH').value)||0;
 var elM=parseFloat(document.getElementById('elM').value)||0;
 var totalHrs=Math.round((elH+elM/60)*100)/100;
 if(totalHrs<=0||totalHrs>8)return showToast('1-8 hr er modhye deen!');
 var key=selE.id+'_'+fd(),rec=R[key];
-if(rec&&rec._id){
-recRef.doc(rec._id).update({earlyHrs:totalHrs,earlyTime:timeNow()}).then(function(){rec.earlyHrs=totalHrs;rec.earlyTime=timeNow();showToast('🚪 Early Leave: '+totalHrs+' hrs');loadRecsMonth(new Date().getFullYear(),new Date().getMonth(),render);});}
+if(rec&&rec._id){var t=timeNow();recRef.doc(rec._id).update({earlyHrs:totalHrs,earlyTime:t}).then(function(){rec.earlyHrs=totalHrs;rec.earlyTime=t;showToast('🚪 Early Leave: '+totalHrs+' hrs');render();}).catch(function(){showToast('❌ Error — abar try korun');});}
 };
+el=document.getElementById('lateRecheck');if(el)el.onclick=function(){
+var me=selE,n=0;showToast('🔄 Checking...');
+function chk(){n++;if(n<2||selE!==me)return;showToast(LATE[me.id]?'✅ Admin allow koreche — ekhon attendance din':'⛔ Ekhono allow kora hoyni');render();}
+loadLateAllows(chk);loadEmpDay(me.id,fd(),chk);
+};
+el=document.getElementById('xTeaser');if(el)el.onclick=function(){openStaffSalary();};
+// History
+el=document.getElementById('histPrev');if(el)el.onclick=function(){histM--;if(histM<0){histM=11;histY--;}render();};
+el=document.getElementById('histNext');if(el)el.onclick=function(){histM++;if(histM>11){histM=0;histY++;}render();};
+el=document.getElementById('histRetry');if(el)el.onclick=function(){var me=selE;_empRecsFailed=false;render();loadEmpRecs(me.id,function(){if(selE===me&&staffTab==='hist')render();});};
+// Salary
+el=document.getElementById('salPwdBtn');if(el)el.onclick=function(){var inp=document.getElementById('salPwdIn').value;if(inp===selE.salaryPwd){salaryPwdSet=true;render();}else showToast('❌ Wrong password!');};
+el=document.getElementById('salPwdIn');if(el)el.addEventListener('keyup',function(e){if(e.key==='Enter'){var b=document.getElementById('salPwdBtn');if(b)b.click();}});
+el=document.getElementById('setSalPwd');if(el)el.onclick=function(){var np=document.getElementById('newSalPwd').value;if(!np||np.length<4)return showToast('Min 4 char!');empRef.doc(selE.id).update({salaryPwd:np}).then(function(){selE.salaryPwd=np;salaryPwdSet=true;showToast('🔐 Password saved!');render();}).catch(function(){showToast('❌ Error');});};
+el=document.getElementById('prevPaidCard');if(el)el.onclick=function(){staffSalBdOpen=!staffSalBdOpen;render();};
+// Documents
+bindStaffDocs();
+// Ajker record sync (late-allow / auto-absent)
+if(staffTab==='att')syncTodayRecord();
+}
+
+function openStaffSalary(){
+if(!selE)return;
+var me=selE,n=0;
+staffTab='salary';salaryPwdSet=false;staffSalBdOpen=false;
+showToast('💰 Loading...');
+function chk(){n++;if(n<2||selE!==me||staffTab!=='salary')return;render();}
+salHistRef.where('empId','==',me.id).get().then(function(s){var arr=[];s.forEach(function(d){var o=d.data();o._id=d.id;arr.push(o);});arr.sort(function(a,b){var ta=a.createdAt?((typeof a.createdAt.toDate==='function')?a.createdAt.toDate().getTime():((a.createdAt.seconds||0)*1000)):0;var tb=b.createdAt?((typeof b.createdAt.toDate==='function')?b.createdAt.toDate().getTime():((b.createdAt.seconds||0)*1000)):0;return tb-ta;});SALHIST[me.id]=arr;chk();}).catch(function(){chk();});
+ensureEmpRecs(chk);
+}
+
+function staffLogin(){
+if(pin.length!==4)return showToast('4 digit PIN deen');
+var matches=[];for(var mi=0;mi<E.length;mi++){if(!E[mi].archived&&E[mi].pin&&String(E[mi].pin)===pin)matches.push(E[mi]);}
+if(matches.length===0){showToast('❌ Bhul PIN!');pin='';render();return;}
+if(matches.length>1){showToast('⚠️ Ekadhik staff er PIN eki rokom — Admin ke unique PIN set korte bolun');pin='';render();return;}
+var me=matches[0],n=0;
+selE=me;sStep='mark';staffTab='att';salaryPwdSet=false;staffSalBdOpen=false;histY=null;histM=null;_empRecsFor=null;_empRecsFailed=false;
+showToast('⏳ Loading...');
+function chk(){n++;if(n<3||selE!==me)return;
+render();
+runAutoAbsent(false,function(created){if(created&&created[me.id]&&mode==='staff'&&selE===me&&(staffTab==='att'||staffTab==='hist'))render();});
+scheduleCutoffSweep();}
+loadLateAllows(chk);loadEmpDay(me.id,fd(),chk);loadEmpAdj(me.id,chk);
+}
+
+/* Late-allow thakle auto-absent soriye dey; deadline par hole nijer Absent record nishchit kore */
+function syncTodayRecord(){
+if(mode!=='staff'||!selE||sStep!=='mark')return;
+var me=selE,today=fd(),key=me.id+'_'+today,rec=R[key];
+if(LATE[me.id]&&isAutoAbs(rec)&&rec._id){
+if(_lateFixBusy)return;_lateFixBusy=true;
+recRef.doc(rec._id).delete().then(function(){if(R[key]===rec)delete R[key];_lateFixBusy=false;if(selE===me&&staffTab==='att')render();}).catch(function(){_lateFixBusy=false;showToast('❌ Network error — Retry korun');});
+}else if(!rec&&isPastCutoff()&&!LATE[me.id]){
+if(_selfAbsBusy)return;_selfAbsBusy=true;
+loadEmpDay(me.id,today,function(){
+if(R[key]){_selfAbsBusy=false;if(selE===me&&staffTab==='att')render();return;}
+writeAutoAbs(me,today,'Auto-Absent ('+cutoffStr()+')').then(function(){_selfAbsBusy=false;});
+});
+}
 }
 
 function doGM(st){
+if(!selE||_gmBusy)return;
+var me=selE,today=fd(),key=me.id+'_'+today;
+if(isPastCutoff()&&!LATE[me.id]){showToast('⛔ Time over! '+cutoffStr()+' er modhye dite hoto');render();return;}
+var ex=R[key];
+if(ex&&!isAutoAbs(ex)){showToast('Ajker attendance already deoa ache');render();return;}
 if(!navigator.geolocation)return showToast('📍 GPS nai!');
+_gmBusy=true;
 showToast('📍 Location check...');
 navigator.geolocation.getCurrentPosition(function(p){
 var d=geoD({lat:p.coords.latitude,lng:p.coords.longitude},{lat:S.lat,lng:S.lng});
-if(d>S.radius)return showToast('⛔ Office theke '+Math.round(d)+'m dure!');
-var data={empId:selE.id,empName:selE.name,date:fd(),status:st,punchIn:timeNow(),punchOut:'',lat:p.coords.latitude,lng:p.coords.longitude,ts:firebase.firestore.FieldValue.serverTimestamp()};
+if(d>S.radius){_gmBusy=false;return showToast('⛔ Office theke '+Math.round(d)+'m dure!');}
+var data={empId:me.id,empName:me.name,date:today,status:st,punchIn:timeNow(),punchOut:'',lat:p.coords.latitude,lng:p.coords.longitude,ts:firebase.firestore.FieldValue.serverTimestamp()};
 showToast('💾 Saving...');
-recRef.add(data).then(function(doc){
+var old=R[key];
+var pre=(old&&isAutoAbs(old)&&old._id)?recRef.doc(old._id).delete().catch(noop):Promise.resolve();
+pre.then(function(){return recRef.add(data);}).then(function(doc){
 data._id=doc.id;
-R[selE.id+'_'+fd()]=data;
+if(R[key]&&isAutoAbs(R[key]))delete R[key];
+putRec(data);
+_gmBusy=false;
 showToast(st==='present'?'✅ Present marked!':'🕐 Half Day marked!');
-// Reload everything fresh to ensure consistency
-loadLateAllows(function(){loadRecsMonth(new Date().getFullYear(),new Date().getMonth(),render);});
-}).catch(function(e){showToast('❌ Error: '+(e.message||'Save failed'));});
-},function(){showToast('📍 Location ON korun!');},{enableHighAccuracy:true,timeout:15000});
+render();
+}).catch(function(e){_gmBusy=false;showToast('❌ Error: '+((e&&e.message)||'Save failed'));});
+},function(){_gmBusy=false;showToast('📍 Location ON korun!');},{enableHighAccuracy:true,timeout:15000});
 }
 
 /* ===== GET SALARY FOR SPECIFIC MONTH ===== */
@@ -487,7 +772,12 @@ if(effVal>bestVal){bestVal=effVal;bestSal=h2.newSalary;}
 return bestSal>=0?bestSal:earliestOld;
 }
 
-/* ===== CALC SALARY ===== */
+/* ===== CALC SALARY =====
+   base      = attendance onujayi salary
+   extras    = OT / Bonus list (title soho)
+   gross     = base + sob OT/Bonus
+   salaryTotal = gross - fine  (ei masher mot salary)
+   net       = main salary payment-e ja dite hobe (alada-paid OT/Bonus bade) */
 function calcSal(e,y,m){
 var totalDays=dim(y,m);
 var sun=csun(y,m);
@@ -499,10 +789,12 @@ var isFutureMonth=new Date(y,m,1)>todayMid;
 var monthlySal=e.salaryType==='monthly'?getSalForMonth(e,y,m):0;
 var dailyR=e.salaryType==='daily'?getSalForMonth(e,y,m):0;
 var perDayRate=e.salaryType==='monthly'?Math.round(monthlySal/30):dailyR;
-if(isFutureMonth){
-return {present:0,half:0,absent:0,effective:0,effWithSun:0,paidSundays:0,base:0,overtime:0,otPaid:false,fine:0,net:0,sundays:sun,totalDays:totalDays,perDay:perDayRate,monthlySal:monthlySal};
-}
-var pr2=0,hf2=0,ab2=0,paidSundays=0,presentFullCount=0;
+var adj=ADJ[e.id+'_'+y+'_'+m]||{};
+var extras=normExtras(adj),extrasTotal=0,extrasSepPaid=0;
+for(var xi=0;xi<extras.length;xi++){extrasTotal+=extras[xi].amount;if(extras[xi].paid)extrasSepPaid+=extras[xi].amount;}
+var fine=parseFloat(adj.fine)||0;
+var pr2=0,hf2=0,ab2=0,paidSundays=0,presentFullCount=0,base=0;
+if(!isFutureMonth){
 for(var d=1;d<=totalDays;d++){
 var thisDate=new Date(y,m,d);
 var isPastDay=thisDate<todayMid;
@@ -511,7 +803,7 @@ if(thisDate.getDay()===0){
 if(e.salaryType==='monthly'&&(isPastDay||isExToday))paidSundays++;
 continue;
 }
-var dt=y+'-'+String(m+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');
+var dt=y+'-'+pad2(m+1)+'-'+pad2(d);
 var rec2=R[e.id+'_'+dt];
 if(rec2){
 if(rec2.status==='present'){presentFullCount++;
@@ -522,14 +814,6 @@ else if(rec2.status==='early')hf2++;
 else ab2++;
 }else if(isPastDay){ab2++;}
 }
-var adjKey=e.id+'_'+y+'_'+m;
-var adj=ADJ[adjKey]||{overtime:0,fine:0};
-var ot=parseFloat(adj.overtime)||0;
-var fine=parseFloat(adj.fine)||0;
-var otPaid=adj.otPaid||false;
-var eff=pr2+hf2*0.5;
-var effWithSun=eff+paidSundays;
-var base;
 if(e.salaryType==='monthly'){
 var pd=monthlySal/30;
 if(isPastMonth){
@@ -543,11 +827,205 @@ base=Math.round(paidDays*pd);
 if(base>monthlySal)base=monthlySal;
 if(base<0)base=0;
 }else{
-base=Math.round(dailyR*eff);
+base=Math.round(dailyR*(pr2+hf2*0.5));
 }
-var netOt=otPaid?0:ot;
-var net=base+netOt-fine;
-return {present:pr2,half:hf2,absent:ab2,effective:eff,effWithSun:effWithSun,paidSundays:paidSundays,base:base,overtime:ot,otPaid:otPaid,fine:fine,net:Math.max(0,net),sundays:sun,totalDays:totalDays,perDay:perDayRate,monthlySal:monthlySal};
+}
+var eff=pr2+hf2*0.5;
+var gross=base+extrasTotal;
+return {present:pr2,half:hf2,absent:ab2,effective:eff,effWithSun:eff+paidSundays,paidSundays:paidSundays,base:base,
+extras:extras,extrasTotal:extrasTotal,extrasSepPaid:extrasSepPaid,fine:fine,gross:gross,
+salaryTotal:Math.max(0,gross-fine),net:Math.max(0,gross-extrasSepPaid-fine),
+sundays:sun,totalDays:totalDays,perDay:perDayRate,monthlySal:monthlySal};
+}
+
+/* Admin salary card-er payment hisab */
+function salMoney(e,sc,adj){
+adj=adj||{};
+var isPaid=!!adj.paid;
+var core=e.isCore?(parseFloat(adj.coreSalary)||0):0,corePaid=!!adj.corePaid;
+var perf=parseFloat(adj.perfBonus)||0,perfPaid=!!adj.perfBonusPaid;
+var inSal=0,pending=0;
+for(var i=0;i<sc.extras.length;i++){var x=sc.extras[i];if(x.paid)continue;if(isPaid&&x.inSalary)inSal+=x.amount;else pending+=x.amount;}
+var grand=sc.salaryTotal+core+perf;
+var paid=(isPaid?Math.max(0,sc.base+inSal-sc.fine):0)+sc.extrasSepPaid+(corePaid?core:0)+(perfPaid?perf:0);
+var allPaid=isPaid&&pending===0&&(!core||corePaid)&&(!perf||perfPaid);
+if(allPaid)paid=grand;
+return {isPaid:isPaid,core:core,corePaid:corePaid,perf:perf,perfPaid:perfPaid,pendingExtras:pending,grand:grand,paid:paid,remaining:allPaid?0:Math.max(0,grand-paid),allPaid:allPaid};
+}
+function salChip(col,txt,ok){return '<div style="display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:50%;background:'+col+';display:inline-block"></span><span style="color:#7d8590;font-size:10px">'+txt+'</span>'+(ok?'<span style="font-size:9px">✅</span>':'')+'</div>';}
+
+function salaryCardHTML(e,sc,adj,mo){
+var id=e.id,h='<div class="card">';
+// Header: naam + total / remaining
+h+='<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">';
+h+='<div><div style="font-size:15px;font-weight:600;color:#e6edf3">'+escHtml(e.name)+'</div>';
+h+='<div style="color:#7d8590;font-size:11px">'+(e.salaryType==='monthly'?'Base: ₹'+fmtINR(sc.monthlySal||e.salary)+'/mo (÷30)':'Rate: ₹'+fmtINR(sc.perDay||e.dailyRate)+'/day')+'</div></div>';
+h+='<div style="text-align:right">';
+if(mo.allPaid){
+h+='<div style="color:#10b981;font-size:20px;font-weight:700">₹0</div>';
+h+='<div style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:20px;background:#10b98122;border:1px solid #10b98133;margin-top:3px"><span style="font-size:11px">✅</span><span style="color:#10b981;font-size:11px;font-weight:700">Paid ₹'+fmtINR(mo.grand)+'</span></div>';
+}else if(mo.paid>0){
+h+='<div style="color:#fbbf24;font-size:20px;font-weight:700">₹'+fmtINR(mo.remaining)+'</div>';
+h+='<div style="color:#7d8590;font-size:10px">remaining</div>';
+h+='<div style="display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:20px;background:#10b98115;margin-top:2px"><span style="font-size:9px">✅</span><span style="color:#10b981;font-size:10px;font-weight:600">₹'+fmtINR(mo.paid)+' paid</span></div>';
+}else{
+h+='<div style="color:#00d4aa;font-size:20px;font-weight:700">₹'+fmtINR(mo.grand)+'</div>';
+h+='<div style="color:#7d8590;font-size:10px">Total Due</div>';
+}
+h+='</div></div>';
+// Breakdown chips
+if(mo.core>0||sc.extrasTotal>0||mo.perf>0){
+h+='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;padding:8px 10px;border-radius:8px;background:#0c1117">';
+h+=salChip('#00d4aa','Salary ₹'+fmtINR(Math.max(0,sc.base-sc.fine)),mo.isPaid);
+if(sc.extrasTotal>0)h+=salChip('#fbbf24','OT/Bonus ₹'+fmtINR(sc.extrasTotal),mo.pendingExtras===0);
+if(mo.core>0)h+=salChip('#a78bfa','Core ₹'+fmtINR(mo.core),mo.corePaid);
+if(mo.perf>0)h+=salChip('#f472b6','Perf. Bonus ₹'+fmtINR(mo.perf),mo.perfPaid);
+h+='</div>';
+}
+// Attendance grid
+h+='<div style="display:grid;grid-template-columns:'+(e.salaryType==='monthly'?'1fr 1fr 1fr 1fr 1fr':'1fr 1fr 1fr 1fr')+';gap:6px;background:#0c1117;border-radius:10px;padding:10px;margin-bottom:10px"><div style="text-align:center"><div style="font-size:14px;font-weight:700;color:#10b981">'+sc.present+'</div><div style="font-size:10px;color:#7d8590">Present</div></div><div style="text-align:center"><div style="font-size:14px;font-weight:700;color:#fbbf24">'+sc.half+'</div><div style="font-size:10px;color:#7d8590">Half</div></div><div style="text-align:center"><div style="font-size:14px;font-weight:700;color:#ff6b6b">'+sc.absent+'</div><div style="font-size:10px;color:#7d8590">Absent</div></div>'+(e.salaryType==='monthly'?'<div style="text-align:center"><div style="font-size:14px;font-weight:700;color:#60a5fa">'+sc.paidSundays+'</div><div style="font-size:10px;color:#7d8590">Sun(Paid)</div></div>':'')+'<div style="text-align:center"><div style="font-size:14px;font-weight:700;color:#e6edf3">'+(e.salaryType==='monthly'?sc.effWithSun:sc.effective)+'</div><div style="font-size:10px;color:#7d8590">Effective</div></div></div>';
+// === OT / BONUS (title soho, ekadhik) ===
+h+='<div style="padding:10px;border-radius:10px;background:#fbbf2410;border:1px solid #fbbf2433;margin-bottom:8px">';
+h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:'+(sc.extras.length?'2px':'8px')+'"><div style="display:flex;align-items:center;gap:6px"><span style="font-size:14px">💰</span><span style="color:#fbbf24;font-size:13px;font-weight:700">OT / Bonus</span></div>'+(sc.extrasTotal>0?'<span style="color:#fbbf24;font-size:13px;font-weight:700">Total ₹'+fmtINR(sc.extrasTotal)+'</span>':'')+'</div>';
+for(var i=0;i<sc.extras.length;i++){var x=sc.extras[i];
+var st=x.paid?{t:'✅ Alada paid'+(x.paidDate?' · '+x.paidDate:''),c:'#10b981'}:(mo.isPaid&&x.inSalary?{t:'✅ Salary-r sathe paid',c:'#10b981'}:(mo.isPaid?{t:'⏳ Due — salary paid-er pore add hoyeche',c:'#fbbf24'}:{t:'Salary-r sathe jog hobe',c:'#7d8590'}));
+var canPay=x.paid||!(mo.isPaid&&x.inSalary);
+h+='<div style="display:flex;align-items:center;gap:6px;padding:8px 0;border-bottom:1px solid #30363d66">';
+h+='<div style="flex:1;min-width:0"><div style="color:#e6edf3;font-size:13px;font-weight:600;word-break:break-word">'+escHtml(x.title)+'</div><div style="color:'+st.c+';font-size:10px;margin-top:2px">'+st.t+'</div></div>';
+h+='<div style="color:#10b981;font-size:13px;font-weight:700;white-space:nowrap">₹'+fmtINR(x.amount)+'</div>';
+if(canPay)h+='<button data-eid="'+id+'" data-xid="'+escHtml(x.id)+'" class="xPay" title="'+(x.paid?'Payment undo':'Ei amount ta alada pay korun')+'" style="padding:6px 8px;font-size:11px;border-radius:8px;cursor:pointer;font-family:inherit;white-space:nowrap;font-weight:700;border:1px solid #fbbf24;background:'+(x.paid?'transparent':'#fbbf24')+';color:'+(x.paid?'#fbbf24':'#0c1117')+'">'+(x.paid?'↩️ Undo':'💸 Pay')+'</button>';
+h+='<button data-eid="'+id+'" data-xid="'+escHtml(x.id)+'" class="xDel" title="Delete" style="background:none;border:none;font-size:15px;cursor:pointer;padding:4px">🗑️</button>';
+h+='</div>';}
+h+='<div style="display:flex;gap:6px;margin-top:8px"><input data-eid="'+id+'" class="xTitle" maxlength="60" placeholder="Title (jemon: Night Shoot OT)" style="margin:0;padding:8px 10px;font-size:13px;flex:1.7;min-width:0"><input data-eid="'+id+'" class="xAmt" type="number" min="0" step="any" inputmode="decimal" placeholder="₹" style="margin:0;padding:8px;font-size:13px;flex:.9;min-width:0"><button data-eid="'+id+'" class="xAdd btn" style="width:auto;padding:8px 12px;font-size:12px;background:#fbbf24;color:#0c1117;flex-shrink:0">➕ Add</button></div>';
+h+='</div>';
+// Fine
+h+='<div style="display:flex;gap:6px;margin-bottom:8px;align-items:center"><span style="color:#ff6b6b;font-size:12px;white-space:nowrap">Fine ₹</span><input data-eid="'+id+'" class="fnIn" type="number" min="0" step="any" placeholder="0" value="'+(sc.fine||'')+'" style="margin:0;padding:8px;font-size:13px;flex:1;min-width:0"><button data-eid="'+id+'" class="saveFine btn bs" style="width:auto;padding:8px 12px;font-size:12px;color:#ff6b6b;border-color:#ff6b6b55">💾 Save</button></div>';
+// Slip + Salary paid
+h+='<div style="display:flex;gap:6px"><button data-eid="'+id+'" class="dlSlip btn bs" style="width:auto;padding:8px 14px;font-size:12px">📄 Slip</button><button data-eid="'+id+'" class="markPaid btn '+(mo.isPaid?'bs':'bp')+'" style="padding:8px;font-size:12px;flex:1">'+(mo.isPaid?'✅ Salary Paid — Undo':'💰 Mark Salary Paid')+'</button></div>';
+if(mo.isPaid)h+='<div style="text-align:center;margin-top:6px;color:#10b981;font-size:11px">✅ Salary paid on '+escHtml(adj.paidDate||'')+'</div>';
+// PERFORMANCE BONUS (all staff)
+h+='<div style="margin-top:8px;padding:10px;border-radius:10px;background:#f472b611;border:1px solid #f472b633"><div style="display:flex;align-items:center;gap:6px;margin-bottom:8px"><span style="font-size:14px">🎯</span><span style="color:#f472b6;font-size:13px;font-weight:700">Performance Bonus</span></div>';
+h+='<div style="display:flex;gap:6px;margin-bottom:6px"><div style="flex:1;display:flex;align-items:center;gap:4px"><span style="color:#f472b6;font-size:12px">₹</span><input data-eid="'+id+'" class="perfIn" type="number" placeholder="0" value="'+(mo.perf||'')+'" style="margin:0;padding:8px;font-size:13px"></div><button data-eid="'+id+'" class="savePerf btn" style="padding:8px;font-size:12px;width:auto;background:#f472b6;color:#0c1117;border:none">💾 Save</button></div>';
+if(mo.perf>0){
+h+='<div style="display:flex;gap:6px"><button data-eid="'+id+'" class="payPerf btn '+(mo.perfPaid?'bs':'bp')+'" style="padding:8px;font-size:12px;background:'+(mo.perfPaid?'transparent':'#f472b6')+';color:'+(mo.perfPaid?'#f472b6':'#0c1117')+';border:'+(mo.perfPaid?'1px solid #f472b6':'none')+'">'+(mo.perfPaid?'✅ Bonus ₹'+fmtINR(mo.perf)+' Paid — Undo':'🎁 Pay Bonus ₹'+fmtINR(mo.perf))+'</button></div>';
+if(mo.perfPaid)h+='<div style="text-align:center;color:#f472b6;font-size:11px;margin-top:4px">✅ Bonus paid on '+escHtml(adj.perfBonusPaidDate||'')+'</div>';
+}
+h+='</div>';
+// CORE TEAM EXTRA SALARY
+if(e.isCore){
+h+='<div style="margin-top:8px;padding:10px;border-radius:10px;background:#a78bfa11;border:1px solid #a78bfa33"><div style="display:flex;align-items:center;gap:6px;margin-bottom:8px"><span style="font-size:14px">⭐</span><span style="color:#a78bfa;font-size:13px;font-weight:700">Core Team Extra Salary</span></div>';
+h+='<div style="display:flex;gap:6px;margin-bottom:6px"><div style="flex:1;display:flex;align-items:center;gap:4px"><span style="color:#a78bfa;font-size:12px">₹</span><input data-eid="'+id+'" class="coreIn" type="number" placeholder="0" value="'+mo.core+'" style="margin:0;padding:8px;font-size:13px"></div><button data-eid="'+id+'" class="saveCore btn" style="padding:8px;font-size:12px;width:auto;background:#a78bfa;color:#0c1117;border:none">💾 Save</button></div>';
+h+='<div style="display:flex;gap:6px"><button data-eid="'+id+'" class="payCore btn '+(mo.corePaid?'bs':'bp')+'" style="padding:8px;font-size:12px;background:'+(mo.corePaid?'transparent':'#a78bfa')+';color:'+(mo.corePaid?'#a78bfa':'#0c1117')+';border:'+(mo.corePaid?'1px solid #a78bfa':'none')+'">'+(mo.corePaid?'✅ Core ₹'+fmtINR(mo.core)+' Paid — Undo':'💎 Pay Core ₹'+fmtINR(mo.core))+'</button></div>';
+if(mo.corePaid)h+='<div style="text-align:center;color:#a78bfa;font-size:11px;margin-top:4px">✅ Core salary paid on '+escHtml(adj.corePaidDate||'')+'</div>';
+h+='</div>';
+}
+h+='</div>';
+return h;
+}
+
+/* ===== SALARY SLIP ===== */
+function numToWords(n){
+n=Math.round(n);if(n===0)return 'Zero';
+var ones=['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
+var tens=['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety'];
+function two(x){return x<20?ones[x]:tens[Math.floor(x/10)]+(x%10?' '+ones[x%10]:'');}
+function three(x){return x>99?ones[Math.floor(x/100)]+' Hundred'+(x%100?' '+two(x%100):''):two(x);}
+var out='';
+if(n>=10000000){out+=three(Math.floor(n/10000000))+' Crore ';n%=10000000;}
+if(n>=100000){out+=three(Math.floor(n/100000))+' Lakh ';n%=100000;}
+if(n>=1000){out+=three(Math.floor(n/1000))+' Thousand ';n%=1000;}
+if(n>0)out+=three(n);
+return out.trim();
+}
+function engRole(r){return r==='editor'?'Video Editor':r==='actor'?'Artist / Performer':r==='dop'?'DOP / Camera Operator':'Staff Member';}
+function openSalarySlip(emp,y,m){
+var sc=calcSal(emp,y,m);
+var slipAdj=ADJ[emp.id+'_'+y+'_'+m]||{};
+var slipBonus=parseFloat(slipAdj.perfBonus)||0;
+var isMonthly=emp.salaryType==='monthly';
+var perD=isMonthly?Math.round((sc.monthlySal||emp.salary)/30):(sc.perDay||emp.dailyRate);
+var absDeduct=isMonthly?(sc.absent*perD)+(sc.half*Math.round(perD/2)):0;
+/* OT/Bonus shudhu EARNINGS-e; deduction-e shudhu Fine */
+var grossEarn=sc.base+sc.extrasTotal+slipBonus;
+var totalDeduct=sc.fine;
+var netPay=Math.max(0,grossEarn-totalDeduct);
+var genDate=new Date();
+var slipNo='ADC/'+y+'/'+pad2(m+1)+'/'+String(emp.id).substring(0,5).toUpperCase();
+var doc2='<!DOCTYPE html><html><head><meta charset="utf-8"><title>Salary Slip — '+escHtml(emp.name)+'</title>';
+doc2+='<style>';
+doc2+='*{margin:0;padding:0;box-sizing:border-box}';
+doc2+='body{font-family:Georgia,\'Times New Roman\',serif;background:#f4f4f4;padding:20px;color:#1a1a1a}';
+doc2+='.sheet{max-width:800px;margin:0 auto;background:#fff;padding:40px 45px;box-shadow:0 2px 12px rgba(0,0,0,0.15)}';
+doc2+='.lh{text-align:center;border-bottom:3px double #1a3c5e;padding-bottom:16px;margin-bottom:4px}';
+doc2+='.lh h1{font-size:26px;color:#1a3c5e;letter-spacing:2px;font-weight:700}';
+doc2+='.lh .sub{font-size:11px;color:#555;margin-top:4px;letter-spacing:0.5px}';
+doc2+='.ptitle{text-align:center;margin:14px 0;font-size:15px;font-weight:700;letter-spacing:3px;color:#1a3c5e;text-transform:uppercase;border:1px solid #1a3c5e;display:inline-block;padding:6px 26px}';
+doc2+='.pt-wrap{text-align:center}';
+doc2+='table{width:100%;border-collapse:collapse;margin-bottom:14px;font-size:12.5px}';
+doc2+='td,th{border:1px solid #999;padding:7px 10px;text-align:left;vertical-align:top}';
+doc2+='th{background:#eef2f6;font-weight:700;color:#1a3c5e}';
+doc2+='.noborder td{border:none;padding:3px 0}';
+doc2+='.amt{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}';
+doc2+='.xnote{font-size:10.5px;color:#777;font-style:italic}';
+doc2+='.net{background:#1a3c5e;color:#fff;font-size:14px;font-weight:700}';
+doc2+='.net td{border-color:#1a3c5e;color:#fff}';
+doc2+='.words{font-style:italic;font-size:12px;padding:8px 0 2px;color:#333}';
+doc2+='.sig{display:flex;justify-content:space-between;margin-top:60px}';
+doc2+='.sigbox{text-align:center;width:220px}';
+doc2+='.sigline{border-top:1.5px solid #333;padding-top:6px;font-size:12px;font-weight:600}';
+doc2+='.sigsub{font-size:10.5px;color:#666;margin-top:2px}';
+doc2+='.seal{width:110px;height:110px;border:1.5px dashed #aaa;border-radius:50%;margin:0 auto 8px;display:flex;align-items:center;justify-content:center;font-size:9px;color:#bbb;text-align:center}';
+doc2+='.foot{margin-top:28px;padding-top:10px;border-top:1px solid #ddd;font-size:9.5px;color:#888;display:flex;justify-content:space-between}';
+doc2+='.printbtn{position:fixed;top:14px;right:14px;padding:12px 22px;background:#1a3c5e;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.3);font-family:inherit}';
+doc2+='@media print{body{background:#fff;padding:0}.sheet{box-shadow:none;padding:20px 25px;max-width:100%}.printbtn{display:none}}';
+doc2+='@page{size:A4;margin:12mm}';
+doc2+='</style></head><body>';
+doc2+='<button class="printbtn" onclick="window.print()">🖨️ Print / Save PDF</button>';
+doc2+='<div class="sheet">';
+// Letterhead
+doc2+='<div class="lh"><h1>ASCENT DIGITAL CREATION</h1>';
+doc2+='<div class="sub">Digital Media &amp; Content Production House</div>';
+doc2+='<div class="sub">Haringhata, Nadia, West Bengal, India</div></div>';
+// Title
+doc2+='<div class="pt-wrap"><div class="ptitle">Salary Slip — '+mn[m]+' '+y+'</div></div>';
+// Employee info
+doc2+='<table><tr><th style="width:22%">Employee Name</th><td style="width:28%">'+escHtml(emp.name)+'</td><th style="width:22%">Slip No.</th><td style="width:28%">'+slipNo+'</td></tr>';
+doc2+='<tr><th>Designation</th><td>'+engRole(emp.role)+'</td><th>Pay Period</th><td>01 '+mn[m]+' '+y+' — '+sc.totalDays+' '+mn[m]+' '+y+'</td></tr>';
+doc2+='<tr><th>Contact</th><td>'+escHtml(emp.phone||'—')+'</td><th>Payment Mode</th><td>Cash / Bank Transfer</td></tr>';
+doc2+='<tr><th>Salary Type</th><td>'+(isMonthly?'Monthly (₹'+fmtINR(sc.monthlySal||emp.salary)+'/month)':'Daily (₹'+fmtINR(perD)+'/day)')+'</td><th>Date of Issue</th><td>'+genDate.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+'</td></tr></table>';
+// Attendance
+doc2+='<table><tr><th colspan="'+(isMonthly?'7':'6')+'" style="text-align:center;background:#1a3c5e;color:#fff">ATTENDANCE SUMMARY</th></tr>';
+doc2+='<tr><th style="text-align:center">Total Days</th><th style="text-align:center">Sundays</th><th style="text-align:center">Present</th><th style="text-align:center">Half Day</th><th style="text-align:center">Absent</th>'+(isMonthly?'<th style="text-align:center">Paid Sundays</th>':'')+'<th style="text-align:center">Payable Days</th></tr>';
+doc2+='<tr><td style="text-align:center">'+sc.totalDays+'</td><td style="text-align:center">'+sc.sundays+'</td><td style="text-align:center">'+sc.present+'</td><td style="text-align:center">'+sc.half+'</td><td style="text-align:center">'+sc.absent+'</td>'+(isMonthly?'<td style="text-align:center">'+sc.paidSundays+'</td>':'')+'<td style="text-align:center;font-weight:700">'+(isMonthly?sc.effWithSun:sc.effective)+'</td></tr></table>';
+// Earnings & Deductions
+doc2+='<table><tr><th colspan="2" style="text-align:center;background:#1a3c5e;color:#fff;width:50%">EARNINGS</th><th colspan="2" style="text-align:center;background:#1a3c5e;color:#fff;width:50%">DEDUCTIONS</th></tr>';
+var earnRows=[],dedRows=[];
+earnRows.push(['Basic Pay ('+(isMonthly?'₹'+fmtINR(perD)+' × payable days':'₹'+fmtINR(perD)+' × '+sc.effective+' days')+')',sc.base]);
+for(var xi=0;xi<sc.extras.length;xi++){var x=sc.extras[xi];earnRows.push([escHtml(x.title)+(x.paid?' <span class="xnote">(paid separately)</span>':''),x.amount]);}
+if(slipBonus>0)earnRows.push(['Performance Bonus'+(slipAdj.perfBonusPaid?' <span class="xnote">(paid)</span>':''),slipBonus]);
+if(isMonthly&&absDeduct>0)dedRows.push(['Absence / Half-day Adjustment*',0]);
+if(sc.fine>0)dedRows.push(['Fine / Penalty',sc.fine]);
+var maxR=Math.max(earnRows.length,dedRows.length,1);
+for(var r2=0;r2<maxR;r2++){
+var eR=earnRows[r2],dR=dedRows[r2];
+doc2+='<tr><td>'+(eR?eR[0]:'')+'</td><td class="amt">'+(eR?'₹'+fmtINR(eR[1]):'')+'</td><td>'+(dR?dR[0]:'')+'</td><td class="amt">'+(dR&&dR[1]>0?'₹'+fmtINR(dR[1]):(dR?'—':''))+'</td></tr>';
+}
+doc2+='<tr><th>Gross Earnings</th><th class="amt">₹'+fmtINR(grossEarn)+'</th><th>Total Deductions</th><th class="amt">₹'+fmtINR(totalDeduct)+'</th></tr>';
+doc2+='<tr class="net"><td colspan="2">NET PAYABLE</td><td colspan="2" class="amt" style="font-size:16px">₹'+fmtINR(netPay)+'</td></tr></table>';
+doc2+='<div class="words">Amount in words: <strong>Rupees '+numToWords(netPay)+' Only</strong></div>';
+if(isMonthly&&absDeduct>0)doc2+='<div style="font-size:9.5px;color:#888;margin-top:4px">*Basic pay is computed on payable days; absence adjustment already reflected in Basic Pay.</div>';
+// Signatures
+doc2+='<div class="sig">';
+doc2+='<div class="sigbox"><div style="height:118px"></div><div class="sigline">Employee Signature</div><div class="sigsub">'+escHtml(emp.name)+'</div></div>';
+doc2+='<div class="sigbox"><div class="seal">COMPANY<br>SEAL</div><div style="height:0"></div><div class="sigline">Authorized Signatory</div><div class="sigsub">Ascent Digital Creation</div></div>';
+doc2+='</div>';
+// Footer
+doc2+='<div class="foot"><span>Slip No: '+slipNo+'</span><span>Generated: '+genDate.toLocaleString('en-IN')+'</span></div>';
+doc2+='</div></body></html>';
+var w2=window.open('','_blank');
+if(!w2){showToast('❌ Popup blocked! Browser settings check korun');return;}
+w2.document.write(doc2);w2.document.close();
+showToast('📄 Slip ready — Print/Save PDF korun');
 }
 
 /* ===== ADMIN MODE ===== */
@@ -584,19 +1062,28 @@ updateNavHighlight();
 
 /* DASHBOARD */
 if(pg==='dash'){
-var pr=0,hf=0;for(var k in R)if(R[k].date===today){if(R[k].status==='present')pr++;else if(R[k].status==='half')hf++;}
-var ab=Math.max(0,activeE().length-pr-hf);
+var act=activeE(),afterCut=isPastCutoff(),pr=0,hf=0,ab=0,pend=0;
+for(var di=0;di<act.length;di++){var r0=R[act[di].id+'_'+today];
+if(!r0){if(afterCut&&!LATE[act[di].id])ab++;else pend++;}
+else if(r0.status==='present')pr++;
+else if(r0.status==='half'||r0.status==='early')hf++;
+else ab++;}
 h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><div><h1 class="df" style="font-size:20px;margin-bottom:2px;color:#e6edf3">Ascent Digital Creation</h1><p style="color:#7d8590;font-size:12px">'+bn()+'</p></div><button id="bk" class="btn bs" style="width:auto;padding:6px 12px;font-size:12px">← Back</button></div>';
-h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:20px"><div style="background:#00d4aa22;border-radius:14px;padding:16px;border:1px solid #00d4aa33"><div style="font-size:28px;font-weight:700;color:#00d4aa">'+activeE().length+'</div><div style="font-size:12px;color:#7d8590">Staff</div></div><div style="background:#10b98122;border-radius:14px;padding:16px;border:1px solid #10b98133"><div style="font-size:28px;font-weight:700;color:#10b981">'+pr+'</div><div style="font-size:12px;color:#7d8590">Present</div></div><div style="background:#fbbf2422;border-radius:14px;padding:16px;border:1px solid #fbbf2433"><div style="font-size:28px;font-weight:700;color:#fbbf24">'+hf+'</div><div style="font-size:12px;color:#7d8590">Half Day</div></div><div style="background:#ff6b6b22;border-radius:14px;padding:16px;border:1px solid #ff6b6b33"><div style="font-size:28px;font-weight:700;color:#ff6b6b">'+ab+'</div><div style="font-size:12px;color:#7d8590">Absent</div></div></div>';
+h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:20px"><div style="background:#00d4aa22;border-radius:14px;padding:16px;border:1px solid #00d4aa33"><div style="font-size:28px;font-weight:700;color:#00d4aa">'+act.length+'</div><div style="font-size:12px;color:#7d8590">Staff</div></div><div style="background:#10b98122;border-radius:14px;padding:16px;border:1px solid #10b98133"><div style="font-size:28px;font-weight:700;color:#10b981">'+pr+'</div><div style="font-size:12px;color:#7d8590">Present</div></div><div style="background:#fbbf2422;border-radius:14px;padding:16px;border:1px solid #fbbf2433"><div style="font-size:28px;font-weight:700;color:#fbbf24">'+hf+'</div><div style="font-size:12px;color:#7d8590">Half Day</div></div><div style="background:#ff6b6b22;border-radius:14px;padding:16px;border:1px solid #ff6b6b33"><div style="font-size:28px;font-weight:700;color:#ff6b6b">'+ab+'</div><div style="font-size:12px;color:#7d8590">Absent</div></div></div>';
 h+='<div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:12px"><h3 style="font-size:15px;color:#e6edf3">📋 Ajker Status</h3><button id="refBtn" style="background:none;border:none;color:#00d4aa;font-size:12px;cursor:pointer">🔄 Refresh</button></div>';
-if(!activeE().length)h+='<p style="color:#7d8590;font-size:13px">Staff tab e employee add korun</p>';
+if(pend>0)h+='<div style="color:#7d8590;font-size:11px;margin:-4px 0 10px;line-height:1.5">⏳ '+pend+' jon ekhono attendance deyni'+(afterCut?' (late allowed)':' — '+cutoffStr()+' er pore automatic Absent hobe')+'</div>';
+if(!act.length)h+='<p style="color:#7d8590;font-size:13px">Staff tab e employee add korun</p>';
 else{var sE=sortedE(),lastType='';
-for(var i=0;i<sE.length;i++){var e=sE[i],rec=R[e.id+'_'+today],st2=rec?(rec.status==='present'?'✅':rec.status==='half'?'🕐':'❌'):'⏳';
+for(var i=0;i<sE.length;i++){var e=sE[i],rec=R[e.id+'_'+today];
+var willAbs=!rec&&afterCut&&!LATE[e.id];
+var st2=rec?(rec.status==='present'?(rec.earlyHrs?'🚪':'✅'):(rec.status==='half'||rec.status==='early')?'🕐':'❌'):(willAbs?'❌':'⏳');
+var sub=rec?(isAutoAbs(rec)?'🤖 '+escHtml(rec.punchIn):'In: '+escHtml(rec.punchIn||'-')+' | Out: '+escHtml(rec.punchOut||'-')):(willAbs?'Not marked → Auto Absent':(LATE[e.id]?'Not marked (late allowed)':'Not marked'));
 var curType=e.salaryType==='daily'?'daily':'monthly';
 if(curType!==lastType){h+=catHeader(curType);lastType=curType;}
-h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #30363d22"><div><div style="font-size:14px;font-weight:500;color:#e6edf3">'+e.name+'</div><div style="color:#7d8590;font-size:11px">'+(rec?'In: '+(rec.punchIn||'-')+' | Out: '+(rec.punchOut||'-'):'Not marked')+'</div></div><span style="font-size:16px">'+st2+'</span></div>';}}
+h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #30363d22"><div><div style="font-size:14px;font-weight:500;color:#e6edf3">'+e.name+'</div><div style="color:#7d8590;font-size:11px">'+sub+'</div></div><span style="font-size:16px">'+st2+'</span></div>';}}
 h+='</div>';
 }
+
 
 /* ATTENDANCE */
 else if(pg==='att'){
@@ -606,7 +1093,7 @@ var ve=null;for(var i=0;i<E.length;i++)if(E[i].id===viewEmpId){ve=E[i];break;}
 if(!ve){viewEmpId=null;render();return;}
 h+='<div style="display:flex;align-items:center;gap:10px;margin-bottom:16px"><button id="attBackBtn" style="background:none;border:none;color:#7d8590;font-size:20px;cursor:pointer">←</button><h2 class="df" style="font-size:18px;color:#e6edf3">'+ve.name+' — '+mn[salM]+' '+salY+'</h2></div>';
 var mO='',yO='';for(var i=0;i<mn.length;i++)mO+='<option value="'+i+'"'+(i===salM?' selected':'')+'>'+mn[i]+'</option>';
-for(var yr=2024;yr<=2027;yr++)yO+='<option value="'+yr+'"'+(yr===salY?' selected':'')+'>'+yr+'</option>';
+for(var yr=2024;yr<=Math.max(2027,new Date().getFullYear()+1);yr++)yO+='<option value="'+yr+'"'+(yr===salY?' selected':'')+'>'+yr+'</option>';
 h+='<div style="display:flex;gap:8px;margin-bottom:12px"><select id="vM">'+mO+'</select><select id="vY" style="flex:.6">'+yO+'</select></div>';
 var dayNames=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 h+='<div class="card" style="padding:10px">';
@@ -643,7 +1130,7 @@ for(var i=0;i<sE.length;i++){var e=sE[i],k2=e.id+'_'+attD,rec=R[k2];
 var curType=e.salaryType==='daily'?'daily':'monthly';
 if(curType!==lastType){h+=catHeader(curType);lastType=curType;}
 h+='<div style="padding:12px 0;'+(i<sE.length-1?'border-bottom:1px solid #30363d':'')+';display:flex;justify-content:space-between;align-items:center">';
-h+='<div style="flex:1"><div style="font-size:14px;font-weight:500;color:#e6edf3">'+e.name+'</div></div>';
+h+='<div style="flex:1"><div style="font-size:14px;font-weight:500;color:#e6edf3">'+e.name+'</div>'+(isAutoAbs(rec)?'<div style="color:#ff6b6b;opacity:.8;font-size:10px;margin-top:2px">🤖 Auto-Absent</div>':'')+'</div>';
 h+='<div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">';
 var ts=['present','half','absent'];for(var t=0;t<ts.length;t++){var ty=ts[t],ac=rec&&rec.status===ty,col=ty==='present'?'#10b981':ty==='half'?'#fbbf24':'#ff6b6b',bg2=ac?(ty==='present'?'#10b98122':ty==='half'?'#fbbf2422':'#ff6b6b22'):'transparent',lb=ty==='present'?'✅P':ty==='half'?'🕐H':'❌A';
 h+='<button data-e="'+e.id+'" data-d="'+attD+'" data-t="'+ty+'" data-has="'+(rec?rec.status:'')+'" class="aM" style="padding:8px 10px;font-size:11px;border-radius:8px;cursor:pointer;border:'+(ac?'2px solid '+col:'1px solid #30363d')+';background:'+bg2+';color:'+col+';min-width:36px;min-height:36px;-webkit-tap-highlight-color:transparent">'+lb+'</button>';}
@@ -686,11 +1173,11 @@ h+='</div>';
 h+='</div>';
 }
 }
-/* SALARY - FIXED: /30 calculation + overtime + fine + slip download */
+/* SALARY — /30 calculation + OT/Bonus (title soho) + fine + slip */
 else if(pg==='salary'){
 var wd=dim(salY,salM)-csun(salY,salM);
 var mO='',yO='';for(var i=0;i<mn.length;i++)mO+='<option value="'+i+'"'+(i===salM?' selected':'')+'>'+mn[i]+'</option>';
-for(var yr=2024;yr<=2027;yr++)yO+='<option value="'+yr+'"'+(yr===salY?' selected':'')+'>'+yr+'</option>';
+for(var yr=2024;yr<=Math.max(2027,new Date().getFullYear()+1);yr++)yO+='<option value="'+yr+'"'+(yr===salY?' selected':'')+'>'+yr+'</option>';
 h+='<h2 class="df" style="font-size:20px;margin-bottom:16px;color:#e6edf3">💰 Salary Report</h2><div style="display:flex;gap:8px;margin-bottom:16px"><select id="sM">'+mO+'</select><select id="sY" style="flex:.6">'+yO+'</select></div>';
 var isRunMon=(salM===new Date().getMonth()&&salY===new Date().getFullYear());
 var isFutMon=new Date(salY,salM,1)>new Date(new Date().getFullYear(),new Date().getMonth(),new Date().getDate());
@@ -702,111 +1189,21 @@ var sE=sortedE(),lastType='';
 for(var i=0;i<sE.length;i++){var e=sE[i];
 var curType=e.salaryType==='daily'?'daily':'monthly';
 if(curType!==lastType){h+=catHeader(curType);lastType=curType;}
-var sc=calcSal(e,salY,salM);
-var adjKey2=e.id+'_'+salY+'_'+salM;var curAdj=ADJ[adjKey2]||{};
-var isPaid=curAdj.paid||false;
-var isOtPaid=curAdj.otPaid||false;
-var coreVal=e.isCore?(parseFloat(curAdj.coreSalary)||0):0;
-var isCorePaid=curAdj.corePaid||false;
-var perfBonus=parseFloat(curAdj.perfBonus)||0;
-var isPerfPaid=curAdj.perfBonusPaid||false;
-
-// Calculate grand total = net pay + core salary + OT (if not already in net) + performance bonus
-// Note: sc.net already includes OT if not otPaid, and excludes OT if otPaid
-// So grand total = base_net_without_ot_adjustment + OT + core + bonus
-var baseNetNoOt=sc.base-sc.fine; // net without any OT
-if(baseNetNoOt<0)baseNetNoOt=0;
-var grandTotal=baseNetNoOt+sc.overtime+coreVal+perfBonus;
-
-// Calculate paid amount
-var paidAmt=0;
-if(isPaid)paidAmt+=sc.net; // main salary paid (includes OT if not separately paid)
-if(isOtPaid)paidAmt+=sc.overtime; // OT paid separately
-if(isCorePaid)paidAmt+=coreVal; // core paid
-if(isPerfPaid)paidAmt+=perfBonus; // performance bonus paid
-
-// Remaining
-var remaining=grandTotal-paidAmt;
-if(remaining<0)remaining=0;
-var allPaid=(isPaid&&(!sc.overtime||isOtPaid)&&(!coreVal||isCorePaid)&&(!perfBonus||isPerfPaid));
-
-total+=grandTotal;
-totalPaidAll+=paidAmt;
-
-// === CARD START ===
-h+='<div class="card">';
-// Header: name + grand total / remaining
-h+='<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">';
-h+='<div><div style="font-size:15px;font-weight:600;color:#e6edf3">'+e.name+'</div>';
-h+='<div style="color:#7d8590;font-size:11px">'+(e.salaryType==='monthly'?'Base: ₹'+(sc.monthlySal||e.salary)+'/mo (÷30)':'Rate: ₹'+(sc.perDay||e.dailyRate)+'/day')+'</div></div>';
-h+='<div style="text-align:right">';
-if(allPaid){
-// All paid — show ₹0 + paid badge
-h+='<div style="color:#10b981;font-size:20px;font-weight:700">₹0</div>';
-h+='<div style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:20px;background:#10b98122;border:1px solid #10b98133;margin-top:3px"><span style="font-size:11px">✅</span><span style="color:#10b981;font-size:11px;font-weight:700">Paid ₹'+grandTotal.toLocaleString('en-IN')+'</span></div>';
-}else if(paidAmt>0){
-// Partially paid
-h+='<div style="color:#fbbf24;font-size:20px;font-weight:700">₹'+remaining.toLocaleString('en-IN')+'</div>';
-h+='<div style="color:#7d8590;font-size:10px">remaining</div>';
-h+='<div style="display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:20px;background:#10b98115;margin-top:2px"><span style="font-size:9px">✅</span><span style="color:#10b981;font-size:10px;font-weight:600">₹'+paidAmt.toLocaleString('en-IN')+' paid</span></div>';
-}else{
-// Nothing paid
-h+='<div style="color:#00d4aa;font-size:20px;font-weight:700">₹'+grandTotal.toLocaleString('en-IN')+'</div>';
-h+='<div style="color:#7d8590;font-size:10px">Total Due</div>';
+var sc=calcSal(e,salY,salM),sAdj=ADJ[e.id+'_'+salY+'_'+salM]||{},mo=salMoney(e,sc,sAdj);
+total+=mo.grand;totalPaidAll+=mo.paid;
+h+=salaryCardHTML(e,sc,sAdj,mo);
 }
-h+='</div></div>';
-
-// Breakdown mini-bar (only if there are multiple components)
-if(coreVal>0||sc.overtime>0||perfBonus>0){
-h+='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;padding:8px 10px;border-radius:8px;background:#0c1117">';
-h+='<div style="display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:50%;background:#00d4aa;display:inline-block"></span><span style="color:#7d8590;font-size:10px">Salary ₹'+sc.net.toLocaleString('en-IN')+'</span>'+(isPaid?'<span style="font-size:9px">✅</span>':'')+'</div>';
-if(sc.overtime>0)h+='<div style="display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:50%;background:#fbbf24;display:inline-block"></span><span style="color:#7d8590;font-size:10px">OT ₹'+sc.overtime.toLocaleString('en-IN')+'</span>'+(isOtPaid?'<span style="font-size:9px">✅</span>':'')+'</div>';
-if(coreVal>0)h+='<div style="display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:50%;background:#a78bfa;display:inline-block"></span><span style="color:#7d8590;font-size:10px">Core ₹'+coreVal.toLocaleString('en-IN')+'</span>'+(isCorePaid?'<span style="font-size:9px">✅</span>':'')+'</div>';
-if(perfBonus>0)h+='<div style="display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:50%;background:#f472b6;display:inline-block"></span><span style="color:#7d8590;font-size:10px">Bonus ₹'+perfBonus.toLocaleString('en-IN')+'</span>'+(isPerfPaid?'<span style="font-size:9px">✅</span>':'')+'</div>';
-h+='</div>';
-}
-
-// Attendance grid
-h+='<div style="display:grid;grid-template-columns:'+(e.salaryType==='monthly'?'1fr 1fr 1fr 1fr 1fr':'1fr 1fr 1fr 1fr')+';gap:6px;background:#0c1117;border-radius:10px;padding:10px;margin-bottom:10px"><div style="text-align:center"><div style="font-size:14px;font-weight:700;color:#10b981">'+sc.present+'</div><div style="font-size:10px;color:#7d8590">Present</div></div><div style="text-align:center"><div style="font-size:14px;font-weight:700;color:#fbbf24">'+sc.half+'</div><div style="font-size:10px;color:#7d8590">Half</div></div><div style="text-align:center"><div style="font-size:14px;font-weight:700;color:#ff6b6b">'+sc.absent+'</div><div style="font-size:10px;color:#7d8590">Absent</div></div>'+(e.salaryType==='monthly'?'<div style="text-align:center"><div style="font-size:14px;font-weight:700;color:#60a5fa">'+sc.paidSundays+'</div><div style="font-size:10px;color:#7d8590">Sun(Paid)</div></div>':'')+'<div style="text-align:center"><div style="font-size:14px;font-weight:700;color:#e6edf3">'+(e.salaryType==='monthly'?sc.effWithSun:sc.effective)+'</div><div style="font-size:10px;color:#7d8590">Effective</div></div></div>';
-// Overtime & Fine inputs
-h+='<div style="display:flex;gap:6px;margin-bottom:8px"><div style="flex:1;display:flex;align-items:center;gap:4px"><span style="color:#10b981;font-size:12px">OT ₹</span><input data-eid="'+e.id+'" class="otIn" type="number" placeholder="0" value="'+(sc.overtime||0)+'" style="margin:0;padding:8px;font-size:13px"></div><div style="flex:1;display:flex;align-items:center;gap:4px"><span style="color:#ff6b6b;font-size:12px">Fine ₹</span><input data-eid="'+e.id+'" class="fnIn" type="number" placeholder="0" value="'+(sc.fine||0)+'" style="margin:0;padding:8px;font-size:13px"></div></div>';
-h+='<div style="display:flex;gap:6px;margin-bottom:6px"><button data-eid="'+e.id+'" class="saveAdj btn bp" style="padding:8px;font-size:12px">💾 Save</button><button data-eid="'+e.id+'" class="clrAdj btn bs" style="padding:8px;font-size:12px;width:auto">🗑️ Clear</button><button data-eid="'+e.id+'" class="dlSlip btn bs" style="padding:8px;font-size:12px;width:auto;flex:1">📄 Slip</button></div>';
-// OT Paid separately
-if(sc.overtime>0){
-h+='<div style="display:flex;gap:6px;margin-bottom:6px"><button data-eid="'+e.id+'" class="payOt btn '+(isOtPaid?'bs':'bp')+'" style="padding:8px;font-size:12px;background:'+(isOtPaid?'transparent':'#fbbf24')+';color:'+(isOtPaid?'#fbbf24':'#0c1117')+';border:'+(isOtPaid?'1px solid #fbbf24':'none')+'">'+(isOtPaid?'✅ OT ₹'+sc.overtime+' Paid — Undo':'💸 Pay OT ₹'+sc.overtime+' Separately')+'</button></div>';
-if(isOtPaid)h+='<div style="text-align:center;color:#fbbf24;font-size:11px;margin-bottom:6px">OT ₹'+sc.overtime+' alag paid on '+(curAdj.otPaidDate||'')+' — salary theke deducted</div>';
-}
-// Salary Paid status
-h+='<div style="display:flex;gap:6px"><button data-eid="'+e.id+'" class="markPaid btn '+(isPaid?'bs':'bp')+'" style="padding:8px;font-size:12px">'+(isPaid?'✅ Salary Paid — Undo':'💰 Mark Salary Paid')+'</button></div>';
-if(isPaid)h+='<div style="text-align:center;margin-top:6px;color:#10b981;font-size:11px">✅ Salary paid on '+(curAdj.paidDate||'')+'</div>';
-// PERFORMANCE BONUS (all staff)
-h+='<div style="margin-top:8px;padding:10px;border-radius:10px;background:#f472b611;border:1px solid #f472b633"><div style="display:flex;align-items:center;gap:6px;margin-bottom:8px"><span style="font-size:14px">🎯</span><span style="color:#f472b6;font-size:13px;font-weight:700">Performance Bonus</span></div>';
-h+='<div style="display:flex;gap:6px;margin-bottom:6px"><div style="flex:1;display:flex;align-items:center;gap:4px"><span style="color:#f472b6;font-size:12px">₹</span><input data-eid="'+e.id+'" class="perfIn" type="number" placeholder="0" value="'+(perfBonus||'')+'" style="margin:0;padding:8px;font-size:13px"></div><button data-eid="'+e.id+'" class="savePerf btn" style="padding:8px;font-size:12px;width:auto;background:#f472b6;color:#0c1117;border:none">💾 Save</button></div>';
-if(perfBonus>0){
-h+='<div style="display:flex;gap:6px"><button data-eid="'+e.id+'" class="payPerf btn '+(isPerfPaid?'bs':'bp')+'" style="padding:8px;font-size:12px;background:'+(isPerfPaid?'transparent':'#f472b6')+';color:'+(isPerfPaid?'#f472b6':'#0c1117')+';border:'+(isPerfPaid?'1px solid #f472b6':'none')+'">'+(isPerfPaid?'✅ Bonus ₹'+perfBonus+' Paid — Undo':'🎁 Pay Bonus ₹'+perfBonus)+'</button></div>';
-if(isPerfPaid)h+='<div style="text-align:center;color:#f472b6;font-size:11px;margin-top:4px">✅ Bonus paid on '+(curAdj.perfBonusPaidDate||'')+'</div>';
-}
-h+='</div>';
-// CORE TEAM EXTRA SALARY
-if(e.isCore){
-h+='<div style="margin-top:8px;padding:10px;border-radius:10px;background:#a78bfa11;border:1px solid #a78bfa33"><div style="display:flex;align-items:center;gap:6px;margin-bottom:8px"><span style="font-size:14px">⭐</span><span style="color:#a78bfa;font-size:13px;font-weight:700">Core Team Extra Salary</span></div>';
-h+='<div style="display:flex;gap:6px;margin-bottom:6px"><div style="flex:1;display:flex;align-items:center;gap:4px"><span style="color:#a78bfa;font-size:12px">₹</span><input data-eid="'+e.id+'" class="coreIn" type="number" placeholder="0" value="'+coreVal+'" style="margin:0;padding:8px;font-size:13px"></div><button data-eid="'+e.id+'" class="saveCore btn" style="padding:8px;font-size:12px;width:auto;background:#a78bfa;color:#0c1117;border:none">💾 Save</button></div>';
-h+='<div style="display:flex;gap:6px"><button data-eid="'+e.id+'" class="payCore btn '+(isCorePaid?'bs':'bp')+'" style="padding:8px;font-size:12px;background:'+(isCorePaid?'transparent':'#a78bfa')+';color:'+(isCorePaid?'#a78bfa':'#0c1117')+';border:'+(isCorePaid?'1px solid #a78bfa':'none')+'">'+(isCorePaid?'✅ Core ₹'+coreVal+' Paid — Undo':'💎 Pay Core ₹'+coreVal)+'</button></div>';
-if(isCorePaid)h+='<div style="text-align:center;color:#a78bfa;font-size:11px;margin-top:4px">✅ Core salary paid on '+(curAdj.corePaidDate||'')+'</div>';
-h+='</div>';
-}
-h+='</div>';}
 // Bottom total bar
 if(activeE().length){
 var totalRemaining=total-totalPaidAll;
 if(totalRemaining<0)totalRemaining=0;
 h+='<div style="background:#00d4aa22;border-radius:14px;padding:16px;border:1px solid #00d4aa44;text-align:center">';
 h+='<div style="color:#7d8590;font-size:12px;margin-bottom:4px">Total Monthly Payout</div>';
-h+='<div style="color:#00d4aa;font-size:28px;font-weight:700">₹'+total.toLocaleString('en-IN')+'</div>';
+h+='<div style="color:#00d4aa;font-size:28px;font-weight:700">₹'+fmtINR(total)+'</div>';
 if(totalPaidAll>0){
 h+='<div style="display:flex;justify-content:center;gap:12px;margin-top:8px;flex-wrap:wrap">';
-h+='<div style="display:inline-flex;align-items:center;gap:4px;padding:4px 12px;border-radius:20px;background:#10b98122;border:1px solid #10b98133"><span style="font-size:12px">✅</span><span style="color:#10b981;font-size:12px;font-weight:700">Paid: ₹'+totalPaidAll.toLocaleString('en-IN')+'</span></div>';
-if(totalRemaining>0)h+='<div style="display:inline-flex;align-items:center;gap:4px;padding:4px 12px;border-radius:20px;background:#fbbf2422;border:1px solid #fbbf2433"><span style="font-size:12px">⏳</span><span style="color:#fbbf24;font-size:12px;font-weight:700">Due: ₹'+totalRemaining.toLocaleString('en-IN')+'</span></div>';
+h+='<div style="display:inline-flex;align-items:center;gap:4px;padding:4px 12px;border-radius:20px;background:#10b98122;border:1px solid #10b98133"><span style="font-size:12px">✅</span><span style="color:#10b981;font-size:12px;font-weight:700">Paid: ₹'+fmtINR(totalPaidAll)+'</span></div>';
+if(totalRemaining>0)h+='<div style="display:inline-flex;align-items:center;gap:4px;padding:4px 12px;border-radius:20px;background:#fbbf2422;border:1px solid #fbbf2433"><span style="font-size:12px">⏳</span><span style="color:#fbbf24;font-size:12px;font-weight:700">Due: ₹'+fmtINR(totalRemaining)+'</span></div>';
 h+='</div>';}
 h+='</div>';
 }
@@ -816,7 +1213,7 @@ h+='</div>';
 else if(pg==='set'){
 h+='<h2 class="df" style="font-size:20px;margin-bottom:16px;color:#e6edf3">⚙️ Settings</h2>'+
 '<div class="card"><h3 style="color:#00d4aa;font-size:14px;margin-bottom:12px">📍 Office Geo-fence</h3><button id="scL" class="btn bp" style="margin-bottom:12px">📍 Current Location = Office</button><div style="display:flex;gap:8px"><div style="flex:1"><label style="color:#7d8590;font-size:11px">Lat</label><input id="sLa" type="number" step="any" value="'+S.lat+'"></div><div style="flex:1"><label style="color:#7d8590;font-size:11px">Lng</label><input id="sLo" type="number" step="any" value="'+S.lng+'"></div></div><label style="color:#7d8590;font-size:11px">Radius (meters)</label><input id="sR" type="number" value="'+S.radius+'"><button id="svS" class="btn bp">Save Location ✅</button></div>'+
-'<div class="card"><h3 style="color:#00d4aa;font-size:14px;margin-bottom:12px">⏰ Attendance Cutoff Time</h3><p style="color:#7d8590;font-size:12px;margin-bottom:10px">Ei time er pore staff nijera attendance dite parbe na — auto absent hoye jabe</p><div style="display:flex;gap:8px"><div style="flex:1"><label style="color:#7d8590;font-size:11px">Hour (0-23)</label><input id="cutH" type="number" min="0" max="23" value="'+(S.cutoffHr||11)+'"></div><div style="flex:1"><label style="color:#7d8590;font-size:11px">Minute (0-59)</label><input id="cutM" type="number" min="0" max="59" value="'+(S.cutoffMin||10)+'"></div></div><button id="svCut" class="btn bp">Save Cutoff ✅</button></div>'+
+'<div class="card"><h3 style="color:#00d4aa;font-size:14px;margin-bottom:12px">⏰ Attendance Cutoff Time</h3><p style="color:#7d8590;font-size:12px;margin-bottom:10px">Ei time er pore staff nijera attendance dite parbe na — jara deyni tara automatic Absent hoye jabe</p><div style="display:flex;gap:8px"><div style="flex:1"><label style="color:#7d8590;font-size:11px">Hour (0-23)</label><input id="cutH" type="number" min="0" max="23" value="'+cutoffHM().h+'"></div><div style="flex:1"><label style="color:#7d8590;font-size:11px">Minute (0-59)</label><input id="cutM" type="number" min="0" max="59" value="'+cutoffHM().m+'"></div></div><button id="svCut" class="btn bp">Save Cutoff ✅</button></div>'+
 '<div class="card"><h3 style="color:#00d4aa;font-size:14px;margin-bottom:12px">🔐 Admin Password</h3><input id="nPwd" type="password" placeholder="New password likhun"><button id="chPwd" class="btn bp">Password Change ✅</button></div>'+
 '<div class="card"><h3 style="color:#00d4aa;font-size:14px;margin-bottom:6px">📝 Agreement Template (চুক্তির লেখা)</h3><p style="color:#7d8590;font-size:11px;margin-bottom:12px">দুই ধরনের চুক্তি — অভিনেতা/অভিনেত্রীর জন্য আলাদা, এবং বাকি সব কর্মীর জন্য একটি। স্টাফ নিজের রোল অনুযায়ী এটাই দেখবে ও সই করবে।</p>'+
 '<label style="color:#fbbf24;font-size:12px;font-weight:600;display:block;margin-bottom:4px">🎭 অভিনেতা/অভিনেত্রী</label><textarea id="agrActor" style="width:100%;min-height:120px;padding:12px;border-radius:12px;border:1px solid #30363d;background:#0c1117;color:#e6edf3;font-size:12px;font-family:inherit;margin-bottom:10px;line-height:1.6;resize:vertical">'+escHtml(getRoleTemplate('actor'))+'</textarea>'+
@@ -839,7 +1236,7 @@ function bindAdmin(){
 var today=fd();
 
 var bk=document.getElementById('bk');if(bk)bk.onclick=function(){mode=null;document.getElementById('adminNav').style.display='none';render();};
-var ref=document.getElementById('refBtn');if(ref)ref.onclick=function(){showToast('🔄...');loadRecsDate(fd(),function(){showToast('✅ Updated!');render();});};
+var ref=document.getElementById('refBtn');if(ref)ref.onclick=function(){showToast('🔄...');loadRecsDate(fd(),function(){runAutoAbsent(false,function(){showToast('✅ Updated!');render();});});};
 
 // Attendance
 var aD2=document.getElementById('aD');if(aD2)aD2.onchange=function(){attD=this.value;loadRecsDate(attD,render);};
@@ -851,32 +1248,39 @@ var btn=this;
 var eid=btn.getAttribute('data-e'),dt=btn.getAttribute('data-d'),ty=btn.getAttribute('data-t'),k=eid+'_'+dt,ex=R[k];
 var hasStatus=btn.getAttribute('data-has')||'';
 if(hasStatus===ty)return;
+var emp0=empById(eid);
 if(hasStatus&&hasStatus!==ty){
-var eName='';for(var j=0;j<E.length;j++)if(E[j].id===eid){eName=E[j].name;break;}
 var lb2={present:'Present ✅',half:'Half Day 🕐',absent:'Absent ❌'};
-if(!confirm(eName+' ('+dt+')\n'+(lb2[hasStatus]||hasStatus)+' → '+(lb2[ty]||ty)+'\n\nChange korben?'))return;
+if(!confirm((emp0?emp0.name:'')+' ('+dt+')\n'+(lb2[hasStatus]||hasStatus)+(isAutoAbs(ex)?' (Auto)':'')+' → '+(lb2[ty]||ty)+'\n\nChange korben?'))return;
 }
 _amLock=true;setTimeout(function(){_amLock=false;},800);
+if(ex&&ex._id){
+var upd={status:ty};
+if(isAutoAbs(ex)){upd.auto=false;upd.punchIn='Manual';}
+recRef.doc(ex._id).update(upd).then(function(){for(var p in upd)ex[p]=upd[p];showToast(ty+' ✅');render();}).catch(function(){_amLock=false;showToast('❌ Error');});
+}else{
 var data={empId:eid,date:dt,status:ty,punchIn:'Manual',punchOut:'',ts:firebase.firestore.FieldValue.serverTimestamp()};
-for(var j=0;j<E.length;j++)if(E[j].id===eid){data.empName=E[j].name;break;}
-if(ex&&ex._id){recRef.doc(ex._id).update({status:ty}).then(function(){ex.status=ty;showToast(ty+' ✅');render();}).catch(function(){_amLock=false;});}
-else{recRef.add(data).then(function(doc){data._id=doc.id;R[k]=data;showToast(ty+' ✅');render();}).catch(function(){_amLock=false;});}};
+if(emp0)data.empName=emp0.name;
+recRef.add(data).then(function(doc){data._id=doc.id;putRec(data);showToast(ty+' ✅');render();}).catch(function(){_amLock=false;showToast('❌ Error');});
+}};
 
-// View individual attendance
+// View individual attendance (month) — Staff page theke-o kaj korbe
 var veBtns=document.querySelectorAll('.viewEmpBtn');for(var ve=0;ve<veBtns.length;ve++)veBtns[ve].onclick=function(){
-viewEmpId=this.getAttribute('data-e');loadRecsMonth(salY,salM,render);};
+viewEmpId=this.getAttribute('data-e');eId=null;pg='att';updateNavHighlight();loadRecsMonth(salY,salM,function(){render();window.scrollTo(0,0);});};
 
-// Allow Late attendance - toggle
+// Allow Late attendance - toggle (allow korle auto-absent soriye dey, withdraw korle deadline par hole abar Absent)
 var alBtns=document.querySelectorAll('.allowLate');for(var al=0;al<alBtns.length;al++)alBtns[al].onclick=function(){
-var eid=this.getAttribute('data-e');var eName='';
-for(var j=0;j<E.length;j++)if(E[j].id===eid){eName=E[j].name;break;}
-var currentlyAllowed=LATE[eid]||false;
-var newState=!currentlyAllowed;
-db.collection('lateAllow').doc(eid+'_'+fd()).set({empId:eid,date:fd(),allowed:newState}).then(function(){
+var eid=this.getAttribute('data-e');var emp=empById(eid);var eName=emp?emp.name:'';
+var newState=!LATE[eid];
+var tdy=fd(),k=eid+'_'+tdy;
+db.collection('lateAllow').doc(eid+'_'+tdy).set({empId:eid,date:tdy,allowed:newState}).then(function(){
 LATE[eid]=newState;
 showToast(newState?'⏰ '+eName+' — late allowed!':'⛔ '+eName+' — allow withdrawn!');
-render();
-});
+var r=R[k];
+if(newState&&isAutoAbs(r)&&r._id){recRef.doc(r._id).delete().then(function(){if(R[k]===r)delete R[k];render();}).catch(function(){render();});}
+else if(!newState&&isPastCutoff()&&emp){loadEmpDay(eid,tdy,function(){if(!R[k])writeAutoAbs(emp,tdy,'Auto-Absent ('+cutoffStr()+')').then(function(){render();});else render();});}
+else render();
+}).catch(function(){showToast('❌ Error');});
 };
 
 var attBack=document.getElementById('attBackBtn');if(attBack)attBack.onclick=function(){viewEmpId=null;render();};
@@ -915,47 +1319,23 @@ empRef.doc(eid).update({isCore:newCore}).then(function(){emp2.isCore=newCore;sho
 };
 // Save Core Salary
 var saveCoreBtns=document.querySelectorAll('.saveCore');for(var sc2=0;sc2<saveCoreBtns.length;sc2++)saveCoreBtns[sc2].onclick=function(){
-var eid=this.getAttribute('data-eid');
-var coreVal=0;
-var coreIns=document.querySelectorAll('.coreIn');for(var ci=0;ci<coreIns.length;ci++)if(coreIns[ci].getAttribute('data-eid')===eid)coreVal=parseFloat(coreIns[ci].value)||0;
-var adjKey=eid+'_'+salY+'_'+salM;
-var existing=ADJ[adjKey]||{};
-var upd={coreSalary:coreVal};
-if(existing._id){adjRef.doc(existing._id).update(upd).then(function(){existing.coreSalary=coreVal;showToast('⭐ Core salary saved: ₹'+coreVal);render();});}
-else{var data={empId:eid,year:String(salY),month:String(salM+1).padStart(2,'0'),overtime:0,fine:0,paid:false,paidDate:'',coreSalary:coreVal,corePaid:false,corePaidDate:''};
-adjRef.add(data).then(function(doc){data._id=doc.id;ADJ[adjKey]=data;showToast('⭐ Core salary saved!');render();});}
+var eid=this.getAttribute('data-eid');var v=parseFloat(inputVal('coreIn',eid))||0;
+adjSave(eid,{coreSalary:v},'⭐ Core salary saved: ₹'+fmtINR(v));
 };
 // Pay Core Salary / Undo
 var payCoreBtns=document.querySelectorAll('.payCore');for(var pc=0;pc<payCoreBtns.length;pc++)payCoreBtns[pc].onclick=function(){
-var eid=this.getAttribute('data-eid');
-var adjKey=eid+'_'+salY+'_'+salM;
-var existing=ADJ[adjKey]||{};
-var newCorePaid=!existing.corePaid;
-var upd={corePaid:newCorePaid,corePaidDate:newCorePaid?fd():''};
-if(existing._id){adjRef.doc(existing._id).update(upd).then(function(){existing.corePaid=newCorePaid;existing.corePaidDate=upd.corePaidDate;showToast(newCorePaid?'💎 Core ₹'+(existing.coreSalary||0)+' Paid!':'↩️ Core Undo!');render();});}
-else{var data={empId:eid,year:String(salY),month:String(salM+1).padStart(2,'0'),overtime:0,fine:0,paid:false,paidDate:'',coreSalary:0,corePaid:newCorePaid,corePaidDate:upd.corePaidDate};
-adjRef.add(data).then(function(doc){data._id=doc.id;ADJ[adjKey]=data;showToast('💎 Core Paid!');render();});}
+var eid=this.getAttribute('data-eid');var a0=curAdjOf(eid),np=!a0.corePaid;
+adjSave(eid,{corePaid:np,corePaidDate:np?fd():''},np?'💎 Core ₹'+fmtINR(a0.coreSalary||0)+' Paid!':'↩️ Core Undo!');
 };
 // Save Performance Bonus
 var savePerfBtns=document.querySelectorAll('.savePerf');for(var spf=0;spf<savePerfBtns.length;spf++)savePerfBtns[spf].onclick=function(){
-var eid=this.getAttribute('data-eid');
-var pv=0;var pIns=document.querySelectorAll('.perfIn');for(var pi=0;pi<pIns.length;pi++)if(pIns[pi].getAttribute('data-eid')===eid)pv=parseFloat(pIns[pi].value)||0;
-var adjKey=eid+'_'+salY+'_'+salM;
-var existing=ADJ[adjKey]||{};
-if(existing._id){adjRef.doc(existing._id).update({perfBonus:pv}).then(function(){existing.perfBonus=pv;showToast('🎯 Performance bonus saved: ₹'+pv);render();}).catch(function(err){showToast('❌ '+(err.message||'Error'));});}
-else{var data={empId:eid,year:String(salY),month:String(salM+1).padStart(2,'0'),overtime:0,fine:0,paid:false,paidDate:'',perfBonus:pv,perfBonusPaid:false,perfBonusPaidDate:''};
-adjRef.add(data).then(function(doc){data._id=doc.id;ADJ[adjKey]=data;showToast('🎯 Performance bonus saved!');render();}).catch(function(err){showToast('❌ '+(err.message||'Error'));});}
+var eid=this.getAttribute('data-eid');var v=parseFloat(inputVal('perfIn',eid))||0;
+adjSave(eid,{perfBonus:v},'🎯 Performance bonus saved: ₹'+fmtINR(v));
 };
 // Pay Performance Bonus / Undo
 var payPerfBtns=document.querySelectorAll('.payPerf');for(var ppf=0;ppf<payPerfBtns.length;ppf++)payPerfBtns[ppf].onclick=function(){
-var eid=this.getAttribute('data-eid');
-var adjKey=eid+'_'+salY+'_'+salM;
-var existing=ADJ[adjKey]||{};
-var newPerfPaid=!existing.perfBonusPaid;
-var upd={perfBonusPaid:newPerfPaid,perfBonusPaidDate:newPerfPaid?fd():''};
-if(existing._id){adjRef.doc(existing._id).update(upd).then(function(){existing.perfBonusPaid=newPerfPaid;existing.perfBonusPaidDate=upd.perfBonusPaidDate;showToast(newPerfPaid?'🎁 Bonus ₹'+(existing.perfBonus||0)+' Paid!':'↩️ Bonus Undo!');render();}).catch(function(err){showToast('❌ '+(err.message||'Error'));});}
-else{var data={empId:eid,year:String(salY),month:String(salM+1).padStart(2,'0'),overtime:0,fine:0,paid:false,paidDate:'',perfBonus:0,perfBonusPaid:newPerfPaid,perfBonusPaidDate:upd.perfBonusPaidDate};
-adjRef.add(data).then(function(doc){data._id=doc.id;ADJ[adjKey]=data;showToast('🎁 Bonus Paid!');render();}).catch(function(err){showToast('❌ '+(err.message||'Error'));});}
+var eid=this.getAttribute('data-eid');var a0=curAdjOf(eid),np=!a0.perfBonusPaid;
+adjSave(eid,{perfBonusPaid:np,perfBonusPaidDate:np?fd():''},np?'🎁 Bonus ₹'+fmtINR(a0.perfBonus||0)+' Paid!':'↩️ Bonus Undo!');
 };
 // Archive (employee left) — keeps all records
 var arBs=document.querySelectorAll('.arE');for(var ar2=0;ar2<arBs.length;ar2++)arBs[ar2].onclick=function(){
@@ -988,166 +1368,61 @@ permanentDeleteEmployee(eid,emp.name);
 var sME=document.getElementById('sM');if(sME)sME.onchange=function(){salM=parseInt(this.value);loadAllSalHist(function(){loadRecsMonth(salY,salM,render);});};
 var sYE=document.getElementById('sY');if(sYE)sYE.onchange=function(){salY=parseInt(this.value);loadAllSalHist(function(){loadRecsMonth(salY,salM,render);});};
 
-// Save OT/Fine
-var saveBtns=document.querySelectorAll('.saveAdj');for(var sb=0;sb<saveBtns.length;sb++)saveBtns[sb].onclick=function(){
+// OT / Bonus — notun item add (title + amount)
+var xAdds=document.querySelectorAll('.xAdd');for(var xa=0;xa<xAdds.length;xa++)xAdds[xa].onclick=function(){
 var eid=this.getAttribute('data-eid');
-var otVal=0,fnVal=0;
-var otIns=document.querySelectorAll('.otIn');for(var oi=0;oi<otIns.length;oi++)if(otIns[oi].getAttribute('data-eid')===eid)otVal=parseFloat(otIns[oi].value)||0;
-var fnIns=document.querySelectorAll('.fnIn');for(var fi=0;fi<fnIns.length;fi++)if(fnIns[fi].getAttribute('data-eid')===eid)fnVal=parseFloat(fnIns[fi].value)||0;
-var adjKey=eid+'_'+salY+'_'+salM;
-var existing=ADJ[adjKey]||{};
-var data={empId:eid,year:String(salY),month:String(salM+1).padStart(2,'0'),overtime:otVal,fine:fnVal,paid:existing.paid||false,paidDate:existing.paidDate||''};
-if(existing._id){adjRef.doc(existing._id).update(data).then(function(){data._id=existing._id;ADJ[adjKey]=data;showToast('✅ Saved!');render();});}
-else{adjRef.add(data).then(function(doc){data._id=doc.id;ADJ[adjKey]=data;showToast('✅ Saved!');render();});}
+var title=String(inputVal('xTitle',eid)).trim().slice(0,60),amt=parseFloat(inputVal('xAmt',eid));
+if(!title)return showToast('❌ OT/Bonus er title likhun');
+if(!(amt>0))return showToast('❌ Amount likhun');
+amt=Math.round(amt*100)/100;
+var items=normExtras(curAdjOf(eid));
+items.push({id:newXId(),title:title,amount:amt,paid:false,paidDate:'',inSalary:false});
+adjSave(eid,{extras:items},'✅ '+title+' — ₹'+fmtINR(amt)+' added');
 };
-
-// Clear OT/Fine
-var clrBtns=document.querySelectorAll('.clrAdj');for(var cb=0;cb<clrBtns.length;cb++)clrBtns[cb].onclick=function(){
-var eid=this.getAttribute('data-eid');
-var adjKey=eid+'_'+salY+'_'+salM;
-var existing=ADJ[adjKey];
-if(existing&&existing._id){
-adjRef.doc(existing._id).update({overtime:0,fine:0}).then(function(){existing.overtime=0;existing.fine=0;showToast('🗑️ OT/Fine cleared!');render();});
-}else{showToast('Nothing to clear');}
+var xAmts=document.querySelectorAll('.xAmt');for(var xm=0;xm<xAmts.length;xm++)xAmts[xm].addEventListener('keyup',function(ev){if(ev.key==='Enter'){var b=document.querySelector('.xAdd[data-eid="'+this.getAttribute('data-eid')+'"]');if(b)b.click();}});
+// OT / Bonus — alada pay / undo
+var xPays=document.querySelectorAll('.xPay');for(var xp=0;xp<xPays.length;xp++)xPays[xp].onclick=function(){
+var eid=this.getAttribute('data-eid'),xid=this.getAttribute('data-xid');
+var a0=curAdjOf(eid),items=normExtras(a0),x=null;
+for(var q=0;q<items.length;q++)if(items[q].id===xid){x=items[q];break;}
+if(!x)return;
+if(!x.paid&&x.inSalary&&a0.paid)return showToast('Eta already salary-r sathe paid hoyeche');
+x.paid=!x.paid;x.paidDate=x.paid?fd():'';if(x.paid)x.inSalary=false;
+adjSave(eid,{extras:items},x.paid?'💸 '+x.title+' ₹'+fmtINR(x.amount)+' paid!':'↩️ '+x.title+' — payment undo');
 };
-
-// Mark Paid / Undo
+// OT / Bonus — delete
+var xDels=document.querySelectorAll('.xDel');for(var xd=0;xd<xDels.length;xd++)xDels[xd].onclick=function(){
+var eid=this.getAttribute('data-eid'),xid=this.getAttribute('data-xid');
+var items=normExtras(curAdjOf(eid)),x=null;
+for(var q=0;q<items.length;q++)if(items[q].id===xid){x=items[q];break;}
+if(!x)return;
+if(!confirm('"'+x.title+'" (₹'+fmtINR(x.amount)+') delete korben?'))return;
+adjSave(eid,{extras:items.filter(function(it){return it.id!==xid;})},'🗑️ '+x.title+' deleted');
+};
+// Fine save
+var fnSaves=document.querySelectorAll('.saveFine');for(var fs=0;fs<fnSaves.length;fs++)fnSaves[fs].onclick=function(){
+var eid=this.getAttribute('data-eid');var v=parseFloat(inputVal('fnIn',eid))||0;
+if(v<0)return showToast('❌ Fine negative hote pare na');
+adjSave(eid,{fine:v},v>0?'✅ Fine ₹'+fmtINR(v)+' saved':'✅ Fine cleared');
+};
+// Mark Salary Paid / Undo — unpaid OT/Bonus salary-r sathe paid dhora hoy
 var paidBtns=document.querySelectorAll('.markPaid');for(var pb=0;pb<paidBtns.length;pb++)paidBtns[pb].onclick=function(){
-var eid=this.getAttribute('data-eid');
-var adjKey=eid+'_'+salY+'_'+salM;
-var existing=ADJ[adjKey]||{};
-var newPaid=!existing.paid;
-// Calculate and store the paid amount so staff view shows correct amount
-var paidAmt=0;
-if(newPaid){var emp3=null;for(var j=0;j<E.length;j++)if(E[j].id===eid){emp3=E[j];break;}
-if(emp3){var sc3=calcSal(emp3,salY,salM);paidAmt=sc3.net;}}
-var data={empId:eid,year:String(salY),month:String(salM+1).padStart(2,'0'),overtime:existing.overtime||0,fine:existing.fine||0,paid:newPaid,paidDate:newPaid?fd():'',paidAmount:newPaid?paidAmt:0,otPaid:existing.otPaid||false,otPaidDate:existing.otPaidDate||''};
-if(existing._id){adjRef.doc(existing._id).update({paid:newPaid,paidDate:data.paidDate,paidAmount:data.paidAmount}).then(function(){existing.paid=newPaid;existing.paidDate=data.paidDate;existing.paidAmount=data.paidAmount;showToast(newPaid?'✅ Salary Paid!':'↩️ Undone!');render();});}
-else{adjRef.add(data).then(function(doc){data._id=doc.id;ADJ[adjKey]=data;showToast('✅ Salary Paid!');render();});}
+var eid=this.getAttribute('data-eid');var emp=empById(eid);if(!emp)return;
+var a0=curAdjOf(eid),newPaid=!a0.paid,sc=calcSal(emp,salY,salM);
+var patch={paid:newPaid,paidDate:newPaid?fd():'',paidAmount:newPaid?sc.net:0};
+var items=normExtras(a0);
+if(items.length||Array.isArray(a0.extras)){for(var q=0;q<items.length;q++)items[q].inSalary=newPaid?!items[q].paid:false;patch.extras=items;}
+adjSave(eid,patch,newPaid?'✅ Salary Paid — ₹'+fmtINR(sc.net):'↩️ Undone!');
 };
-
-// Pay OT Separately / Undo
-var otBtns=document.querySelectorAll('.payOt');for(var ob=0;ob<otBtns.length;ob++)otBtns[ob].onclick=function(){
-var eid=this.getAttribute('data-eid');
-var adjKey=eid+'_'+salY+'_'+salM;
-var existing=ADJ[adjKey]||{};
-var newOtPaid=!existing.otPaid;
-var upd={otPaid:newOtPaid,otPaidDate:newOtPaid?fd():''};
-if(existing._id){adjRef.doc(existing._id).update(upd).then(function(){existing.otPaid=newOtPaid;existing.otPaidDate=upd.otPaidDate;showToast(newOtPaid?'💸 OT ₹'+(existing.overtime||0)+' Paid!':'↩️ OT Undo!');render();});}
-else{var data={empId:eid,year:String(salY),month:String(salM+1).padStart(2,'0'),overtime:existing.overtime||0,fine:existing.fine||0,paid:false,paidDate:'',otPaid:newOtPaid,otPaidDate:upd.otPaidDate};
-adjRef.add(data).then(function(doc){data._id=doc.id;ADJ[adjKey]=data;showToast('💸 OT Paid!');render();});}
-};
-
-// Salary Slip Download
-function numToWords(n){
-n=Math.round(n);if(n===0)return 'Zero';
-var ones=['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
-var tens=['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety'];
-function two(x){return x<20?ones[x]:tens[Math.floor(x/10)]+(x%10?' '+ones[x%10]:'');}
-function three(x){return x>99?ones[Math.floor(x/100)]+' Hundred'+(x%100?' '+two(x%100):''):two(x);}
-var out='';
-if(n>=10000000){out+=three(Math.floor(n/10000000))+' Crore ';n%=10000000;}
-if(n>=100000){out+=three(Math.floor(n/100000))+' Lakh ';n%=100000;}
-if(n>=1000){out+=three(Math.floor(n/1000))+' Thousand ';n%=1000;}
-if(n>0)out+=three(n);
-return out.trim();
-}
-function engRole(r){return r==='editor'?'Video Editor':r==='actor'?'Artist / Performer':r==='dop'?'DOP / Camera Operator':'Staff Member';}
+// Salary Slip
 var slipBtns=document.querySelectorAll('.dlSlip');for(var sl=0;sl<slipBtns.length;sl++)slipBtns[sl].onclick=function(){
-var eid=this.getAttribute('data-eid');var emp=null;for(var j=0;j<E.length;j++)if(E[j].id===eid){emp=E[j];break;}
-if(!emp)return;
-var sc=calcSal(emp,salY,salM);
-var slipAdj=ADJ[eid+'_'+salY+'_'+salM]||{};
-var slipBonus=parseFloat(slipAdj.perfBonus)||0;
-var isMonthly=emp.salaryType==='monthly';
-var perD=isMonthly?Math.round((sc.monthlySal||emp.salary)/30):(sc.perDay||emp.dailyRate);
-var absDeduct=isMonthly?(sc.absent*perD)+(sc.half*Math.round(perD/2)):0;
-var grossEarn=sc.base+sc.overtime+slipBonus;
-var totalDeduct=sc.fine+(sc.otPaid?sc.overtime:0);
-var netPay=sc.net+slipBonus;
-var genDate=new Date();
-var slipNo='ADC/'+salY+'/'+String(salM+1).padStart(2,'0')+'/'+eid.substring(0,5).toUpperCase();
-var doc2='<!DOCTYPE html><html><head><meta charset="utf-8"><title>Salary Slip — '+escHtml(emp.name)+'</title>';
-doc2+='<style>';
-doc2+='*{margin:0;padding:0;box-sizing:border-box}';
-doc2+='body{font-family:Georgia,\'Times New Roman\',serif;background:#f4f4f4;padding:20px;color:#1a1a1a}';
-doc2+='.sheet{max-width:800px;margin:0 auto;background:#fff;padding:40px 45px;box-shadow:0 2px 12px rgba(0,0,0,0.15)}';
-doc2+='.lh{text-align:center;border-bottom:3px double #1a3c5e;padding-bottom:16px;margin-bottom:4px}';
-doc2+='.lh h1{font-size:26px;color:#1a3c5e;letter-spacing:2px;font-weight:700}';
-doc2+='.lh .sub{font-size:11px;color:#555;margin-top:4px;letter-spacing:0.5px}';
-doc2+='.ptitle{text-align:center;margin:14px 0;font-size:15px;font-weight:700;letter-spacing:3px;color:#1a3c5e;text-transform:uppercase;border:1px solid #1a3c5e;display:inline-block;padding:6px 26px}';
-doc2+='.pt-wrap{text-align:center}';
-doc2+='table{width:100%;border-collapse:collapse;margin-bottom:14px;font-size:12.5px}';
-doc2+='td,th{border:1px solid #999;padding:7px 10px;text-align:left;vertical-align:top}';
-doc2+='th{background:#eef2f6;font-weight:700;color:#1a3c5e}';
-doc2+='.noborder td{border:none;padding:3px 0}';
-doc2+='.amt{text-align:right;font-variant-numeric:tabular-nums}';
-doc2+='.net{background:#1a3c5e;color:#fff;font-size:14px;font-weight:700}';
-doc2+='.net td{border-color:#1a3c5e;color:#fff}';
-doc2+='.words{font-style:italic;font-size:12px;padding:8px 0 2px;color:#333}';
-doc2+='.sig{display:flex;justify-content:space-between;margin-top:60px}';
-doc2+='.sigbox{text-align:center;width:220px}';
-doc2+='.sigline{border-top:1.5px solid #333;padding-top:6px;font-size:12px;font-weight:600}';
-doc2+='.sigsub{font-size:10.5px;color:#666;margin-top:2px}';
-doc2+='.seal{width:110px;height:110px;border:1.5px dashed #aaa;border-radius:50%;margin:0 auto 8px;display:flex;align-items:center;justify-content:center;font-size:9px;color:#bbb;text-align:center}';
-doc2+='.foot{margin-top:28px;padding-top:10px;border-top:1px solid #ddd;font-size:9.5px;color:#888;display:flex;justify-content:space-between}';
-doc2+='.printbtn{position:fixed;top:14px;right:14px;padding:12px 22px;background:#1a3c5e;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.3);font-family:inherit}';
-doc2+='@media print{body{background:#fff;padding:0}.sheet{box-shadow:none;padding:20px 25px;max-width:100%}.printbtn{display:none}}';
-doc2+='@page{size:A4;margin:12mm}';
-doc2+='</style></head><body>';
-doc2+='<button class="printbtn" onclick="window.print()">🖨️ Print / Save PDF</button>';
-doc2+='<div class="sheet">';
-// Letterhead
-doc2+='<div class="lh"><h1>ASCENT DIGITAL CREATION</h1>';
-doc2+='<div class="sub">Digital Media &amp; Content Production House</div>';
-doc2+='<div class="sub">Haringhata, Nadia, West Bengal, India</div></div>';
-// Title
-doc2+='<div class="pt-wrap"><div class="ptitle">Salary Slip — '+mn[salM]+' '+salY+'</div></div>';
-// Employee info
-doc2+='<table><tr><th style="width:22%">Employee Name</th><td style="width:28%">'+escHtml(emp.name)+'</td><th style="width:22%">Slip No.</th><td style="width:28%">'+slipNo+'</td></tr>';
-doc2+='<tr><th>Designation</th><td>'+engRole(emp.role)+'</td><th>Pay Period</th><td>01 '+mn[salM]+' '+salY+' — '+sc.totalDays+' '+mn[salM]+' '+salY+'</td></tr>';
-doc2+='<tr><th>Contact</th><td>'+escHtml(emp.phone||'—')+'</td><th>Payment Mode</th><td>Cash / Bank Transfer</td></tr>';
-doc2+='<tr><th>Salary Type</th><td>'+(isMonthly?'Monthly (₹'+(sc.monthlySal||emp.salary).toLocaleString('en-IN')+'/month)':'Daily (₹'+perD.toLocaleString('en-IN')+'/day)')+'</td><th>Date of Issue</th><td>'+genDate.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+'</td></tr></table>';
-// Attendance
-doc2+='<table><tr><th colspan="'+(isMonthly?'7':'6')+'" style="text-align:center;background:#1a3c5e;color:#fff">ATTENDANCE SUMMARY</th></tr>';
-doc2+='<tr><th style="text-align:center">Total Days</th><th style="text-align:center">Sundays</th><th style="text-align:center">Present</th><th style="text-align:center">Half Day</th><th style="text-align:center">Absent</th>'+(isMonthly?'<th style="text-align:center">Paid Sundays</th>':'')+'<th style="text-align:center">Payable Days</th></tr>';
-doc2+='<tr><td style="text-align:center">'+sc.totalDays+'</td><td style="text-align:center">'+sc.sundays+'</td><td style="text-align:center">'+sc.present+'</td><td style="text-align:center">'+sc.half+'</td><td style="text-align:center">'+sc.absent+'</td>'+(isMonthly?'<td style="text-align:center">'+sc.paidSundays+'</td>':'')+'<td style="text-align:center;font-weight:700">'+(isMonthly?sc.effWithSun:sc.effective)+'</td></tr></table>';
-// Earnings & Deductions
-doc2+='<table><tr><th colspan="2" style="text-align:center;background:#1a3c5e;color:#fff;width:50%">EARNINGS</th><th colspan="2" style="text-align:center;background:#1a3c5e;color:#fff;width:50%">DEDUCTIONS</th></tr>';
-var earnRows=[],dedRows=[];
-earnRows.push(['Basic Pay ('+(isMonthly?'₹'+perD+' × payable days':'₹'+perD+' × '+sc.effective+' days')+')',sc.base]);
-if(sc.overtime>0)earnRows.push(['Overtime'+(sc.otPaid?' (paid separately)':''),sc.overtime]);
-if(slipBonus>0)earnRows.push(['Performance Bonus'+(slipAdj.perfBonusPaid?' (paid)':''),slipBonus]);
-if(isMonthly&&absDeduct>0)dedRows.push(['Absence / Half-day Adjustment*',0]);
-if(sc.fine>0)dedRows.push(['Fine / Penalty',sc.fine]);
-if(sc.otPaid&&sc.overtime>0)dedRows.push(['OT Paid Separately (adjusted)',sc.overtime]);
-var maxR=Math.max(earnRows.length,dedRows.length,1);
-for(var r2=0;r2<maxR;r2++){
-var eR=earnRows[r2],dR=dedRows[r2];
-doc2+='<tr><td>'+(eR?eR[0]:'')+'</td><td class="amt">'+(eR?'₹'+eR[1].toLocaleString('en-IN'):'')+'</td><td>'+(dR?dR[0]:'')+'</td><td class="amt">'+(dR&&dR[1]>0?'₹'+dR[1].toLocaleString('en-IN'):(dR?'—':''))+'</td></tr>';
-}
-doc2+='<tr><th>Gross Earnings</th><th class="amt">₹'+grossEarn.toLocaleString('en-IN')+'</th><th>Total Deductions</th><th class="amt">₹'+totalDeduct.toLocaleString('en-IN')+'</th></tr>';
-doc2+='<tr class="net"><td colspan="2">NET PAYABLE</td><td colspan="2" class="amt" style="font-size:16px">₹'+netPay.toLocaleString('en-IN')+'</td></tr></table>';
-doc2+='<div class="words">Amount in words: <strong>Rupees '+numToWords(netPay)+' Only</strong></div>';
-if(isMonthly&&absDeduct>0)doc2+='<div style="font-size:9.5px;color:#888;margin-top:4px">*Basic pay is computed on payable days; absence adjustment already reflected in Basic Pay.</div>';
-// Signatures
-doc2+='<div class="sig">';
-doc2+='<div class="sigbox"><div style="height:118px"></div><div class="sigline">Employee Signature</div><div class="sigsub">'+escHtml(emp.name)+'</div></div>';
-doc2+='<div class="sigbox"><div class="seal">COMPANY<br>SEAL</div><div style="height:0"></div><div class="sigline">Authorized Signatory</div><div class="sigsub">Ascent Digital Creation</div></div>';
-doc2+='</div>';
-// Footer
-doc2+='<div class="foot"><span>Slip No: '+slipNo+'</span><span>Generated: '+genDate.toLocaleString('en-IN')+'</span></div>';
-doc2+='</div></body></html>';
-var w2=window.open('','_blank');
-if(!w2){showToast('❌ Popup blocked! Browser settings check korun');return;}
-w2.document.write(doc2);w2.document.close();
-showToast('📄 Slip ready — Print/Save PDF korun');
+var emp=empById(this.getAttribute('data-eid'));if(emp)openSalarySlip(emp,salY,salM);
 };
 
 // Settings
 var scL=document.getElementById('scL');if(scL)scL.onclick=function(){if(!navigator.geolocation)return showToast('GPS nai!');showToast('📍 Getting...');navigator.geolocation.getCurrentPosition(function(p){S.lat=p.coords.latitude;S.lng=p.coords.longitude;setRef.set(S,{merge:true}).then(function(){showToast('📍 Office set!');render();});},function(){showToast('Error!');},{enableHighAccuracy:true});};
 var svS=document.getElementById('svS');if(svS)svS.onclick=function(){S.lat=parseFloat(document.getElementById('sLa').value);S.lng=parseFloat(document.getElementById('sLo').value);S.radius=parseInt(document.getElementById('sR').value)||200;setRef.set(S,{merge:true}).then(function(){showToast('⚙️ Saved!');});};
-var svCut=document.getElementById('svCut');if(svCut)svCut.onclick=function(){S.cutoffHr=parseInt(document.getElementById('cutH').value);S.cutoffMin=parseInt(document.getElementById('cutM').value);if(isNaN(S.cutoffHr)||S.cutoffHr<0||S.cutoffHr>23)S.cutoffHr=11;if(isNaN(S.cutoffMin)||S.cutoffMin<0||S.cutoffMin>59)S.cutoffMin=10;setRef.set(S,{merge:true}).then(function(){showToast('⏰ Cutoff saved: '+String(S.cutoffHr).padStart(2,'0')+':'+String(S.cutoffMin).padStart(2,'0'));});};
+var svCut=document.getElementById('svCut');if(svCut)svCut.onclick=function(){S.cutoffHr=parseInt(document.getElementById('cutH').value);S.cutoffMin=parseInt(document.getElementById('cutM').value);if(isNaN(S.cutoffHr)||S.cutoffHr<0||S.cutoffHr>23)S.cutoffHr=11;if(isNaN(S.cutoffMin)||S.cutoffMin<0||S.cutoffMin>59)S.cutoffMin=10;setRef.set(S,{merge:true}).then(function(){showToast('⏰ Cutoff saved: '+cutoffStr());scheduleCutoffSweep();runAutoAbsent(false,noop);});};
 var chP=document.getElementById('chPwd');if(chP)chP.onclick=function(){var np=document.getElementById('nPwd').value;if(!np||np.length<4)return showToast('Min 4 char!');S.adminPwd=np;setRef.set({adminPwd:np},{merge:true}).then(function(){showToast('🔐 Changed!');document.getElementById('nPwd').value='';});};
 var svAgr=document.getElementById('svAgr');if(svAgr)svAgr.onclick=function(){
 var t={actor:(document.getElementById('agrActor')||{}).value||'',other:(document.getElementById('agrOther')||{}).value||''};
@@ -1340,8 +1615,8 @@ var sal=parseFloat(document.getElementById('fsa').value)||0,daily=parseFloat(doc
 if(!name)return showToast('Naam likhun!');if(!pinV||pinV.length!==4)return showToast('4 digit PIN deen!');
 var data={name:name,phone:phone,salaryType:ftype,salary:sal,dailyRate:daily,pin:pinV,role:(document.getElementById('frole')||{}).value||'other'};
 showToast('💾 Saving...');
-if(eId){empRef.doc(eId).update(data).then(function(){for(var i=0;i<E.length;i++)if(E[i].id===eId){data.id=eId;E[i]=data;break;}showToast('✅ Updated!');eId=null;render();}).catch(function(){showToast('Error!');});}
-else{empRef.add(data).then(function(doc){data.id=doc.id;E.push(data);showToast('✅ Added!');eId=null;render();}).catch(function(){showToast('Error!');});}};
+var editId=eId;if(editId){empRef.doc(editId).update(data).then(function(){var cur=empById(editId);if(cur){for(var p in data)cur[p]=data[p];}showToast('✅ Updated!');eId=null;render();}).catch(function(){showToast('Error!');});}
+else{data.joinedOn=fd();empRef.add(data).then(function(doc){data.id=doc.id;E.push(data);showToast('✅ Added!');eId=null;render();}).catch(function(){showToast('Error!');});}};
 document.getElementById('cnE').onclick=function(){eId=null;render();};
 }
 
